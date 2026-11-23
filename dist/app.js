@@ -1,5 +1,5 @@
 /* app.js —— 由 build/concat.py 拼接，禁止手改。
-   构建：2026-11-23 22:31:41  dev  22 个文件
+   构建：2026-11-23 22:54:30  dev  22 个文件
    顺序见 build/manifest.json */
 
 /* ──────── src/ui/shared/dom.js ──────── */
