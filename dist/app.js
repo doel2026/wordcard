@@ -1,5 +1,5 @@
 /* app.js —— 由 build/concat.py 拼接，禁止手改。
-   构建：2026-11-23 22:54:30  dev  22 个文件
+   构建：2026-11-23 22:56:28  dev  22 个文件
    顺序见 build/manifest.json */
 
 /* ──────── src/ui/shared/dom.js ──────── */
@@ -645,7 +645,21 @@
     return bar;
   }
 
-  function iconRow(moreOnClick) {
+  function iconRow(moreOnClick, actions) {
+    var on = actions || {};
+    function btn(name, label, handler) {
+      if (!handler) return WC.ui.icon(name);
+      return h(
+        "button",
+        {
+          class: "mob-icbtn" + (on[name + "On"] ? " is-on" : ""),
+          type: "button",
+          "aria-label": label,
+          on: { click: handler }
+        },
+        WC.ui.icon(name)
+      );
+    }
     var more = moreOnClick
       ? h(
           "button",
@@ -658,15 +672,31 @@
           WC.ui.icon("more")
         )
       : WC.ui.icon("more");
-    return h("div", { class: "mob-ics" }, WC.ui.icon("star"), WC.ui.icon("sound"), more);
+    return h(
+      "div",
+      { class: "mob-ics" },
+      btn("star", on.starOn ? "取消收藏" : "收藏", on.onFav),
+      btn("sound", "朗读", on.onSpeak),
+      more
+    );
   }
 
-  function learnHeader(head, onMore) {
+  function headerActions(vm, dispatch) {
+    var word = vm.learn && vm.learn.word;
+    if (!word) return {};
+    return {
+      starOn: !!word.fav,
+      onFav: function () { dispatch({ type: word.fav ? "unfav" : "fav" }); },
+      onSpeak: function () { dispatch({ type: "speak" }); }
+    };
+  }
+
+  function learnHeader(head, onMore, actions) {
     return h(
       "header",
       { class: "mob-top" },
       h("div", { class: "mob-head", text: head }),
-      iconRow(onMore)
+      iconRow(onMore, actions)
     );
   }
 
@@ -725,7 +755,9 @@
     var group = vm.counts && vm.counts.group ? vm.counts.group : { mastered: 0, size: 0 };
 
     var page = h("main", { class: "mob-page mob-learn mob-done" });
-    page.appendChild(learnHeader(learn.head, function () { openMenu(vm, dispatch); }));
+    page.appendChild(
+      learnHeader(learn.head, function () { openMenu(vm, dispatch); }, headerActions(vm, dispatch))
+    );
 
     var box = h("div", { class: "mob-done-box" });
     box.appendChild(h("div", { class: "mob-done-title", text: empty ? "还没有词本" : "本组完成" }));
@@ -756,7 +788,9 @@
     var w = learn.word;
     var page = h("main", { class: "mob-page mob-learn mob-detail" });
 
-    page.appendChild(learnHeader(learn.head, function () { openMenu(vm, dispatch); }));
+    page.appendChild(
+      learnHeader(learn.head, function () { openMenu(vm, dispatch); }, headerActions(vm, dispatch))
+    );
 
     var body = h("div", { class: "mob-detail-body" });
     body.appendChild(h("h1", { class: "mob-word-w", text: w.w }));
@@ -801,9 +835,11 @@
     });
 
     page.appendChild(
-      learnHeader(learn.head, function () {
-        openMenu(vm, dispatch);
-      })
+      learnHeader(
+        learn.head,
+        function () { openMenu(vm, dispatch); },
+        headerActions(vm, dispatch)
+      )
     );
 
     page.appendChild(
