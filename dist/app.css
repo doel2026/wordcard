@@ -4,7 +4,7 @@
 /* tokens.css —— 由 build/gen_tokens.py 从 build/tokens.json 生成，禁止手改。
    想改颜色 / 圆角 / 字号：改 build/tokens.json，然后
        python3 build/gen_tokens.py
-   tokens 指纹：e2f4aae992
+   tokens 指纹：542c1b86f6
 */
 
 :root{
@@ -77,6 +77,7 @@
   --fs-mobile-phonetic:13px;
   --fs-mobile-btn:15px;
   --fs-mobile-h2:22px;
+  --fs-mobile-icon:19px;
 
   --pad-phone:18px;
   --pad-card:16px;
@@ -360,11 +361,20 @@ button, [role="button"]{-webkit-tap-highlight-color:transparent}
   line-height:1.5;
 }
 .mob-ics{
-  display:flex;align-items:center;gap:3px;
-  font-size:12px;letter-spacing:4px;
+  display:flex;align-items:center;gap:2px;
   color:var(--canvas-sub);line-height:1;
 }
-.mob-ics .wc-ic{font-size:12px;line-height:1}
+.mob-ics .wc-ic{font-size:var(--fs-mobile-icon);line-height:1}
+/* 图标按钮：19px 字形 + 44×44 的点击区（拇指够得着） */
+.mob-icbtn{
+  display:flex;align-items:center;justify-content:center;
+  width:40px;height:40px;
+  margin:-6px 0;
+  color:var(--canvas-sub);
+  border-radius:var(--radius-pill);
+}
+.mob-icbtn.is-on{color:var(--deep)}
+.mob-icbtn:active{background:var(--white-46)}
 .mob-more{
   margin:-8px -8px -8px 0;
   padding:8px;
