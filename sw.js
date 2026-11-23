@@ -2,7 +2,7 @@
    改了 dist/app.js / app.css / index.html 之后必须重新生成：python3 build/gen_sw.py
    （build/check.py 第 7 条会比对 VERSION 哈希，忘了生成会直接报错。） */
 
-const VERSION = "136c670f";
+const VERSION = "44dc4fde";
 const CACHE = "wc7-" + VERSION;
 const ASSETS = [
   "./index.html",
