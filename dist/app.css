@@ -4,7 +4,7 @@
 /* tokens.css —— 由 build/gen_tokens.py 从 build/tokens.json 生成，禁止手改。
    想改颜色 / 圆角 / 字号：改 build/tokens.json，然后
        python3 build/gen_tokens.py
-   tokens 指纹：f58e2d7e5e
+   tokens 指纹：e2f4aae992
 */
 
 :root{
@@ -69,6 +69,14 @@
   --fs-tiny:10px;
   --fs-phonetic:12px;
   --fs-btn:14px;
+  --fs-mobile-body:16px;
+  --fs-mobile-small:12px;
+  --fs-mobile-tiny:11px;
+  --fs-mobile-word:34px;
+  --fs-mobile-word-reveal:30px;
+  --fs-mobile-phonetic:13px;
+  --fs-mobile-btn:15px;
+  --fs-mobile-h2:22px;
 
   --pad-phone:18px;
   --pad-card:16px;
@@ -299,6 +307,15 @@ body.wc-has-notice .desk-root{padding-top:26px}
 
 /* ── 画布：铺满视口；>560px 收成 420px 居中的栏 ──────── */
 .mob-root{
+  /* 手机上整体放大一档：正文 13→16，单词 31→34（桌面端不受影响，值在 tokens 里） */
+  --fs-body:var(--fs-mobile-body);
+  --fs-small:var(--fs-mobile-small);
+  --fs-tiny:var(--fs-mobile-tiny);
+  --fs-word-mobile:var(--fs-mobile-word);
+  --fs-word-mobile-reveal:var(--fs-mobile-word-reveal);
+  --fs-phonetic:var(--fs-mobile-phonetic);
+  --fs-btn:var(--fs-mobile-btn);
+  --fs-h2:var(--fs-mobile-h2);
   display:flex;flex-direction:column;
   width:100%;
   min-height:100vh;
@@ -376,13 +393,14 @@ button, [role="button"]{-webkit-tap-highlight-color:transparent}
 .mob-learn.is-reveal .mob-word h1{font-size:var(--fs-word-mobile-reveal)}
 
 /* ── 学习页 · 选项 ───────────────────────────────────── */
-.mob-opts{padding:26px 18px 0}
+.mob-opts{padding:26px 12px 0}
 .mob-learn.is-reveal .mob-opts{padding-top:16px}
+.mob-opts .wc-opt{padding:12px 14px}
 .mob-opts .wc-pos{margin-bottom:2px}
 
 .mob-skip{
   margin-top:auto;
-  padding:20px 18px 26px;
+  padding:20px 12px 26px;
   text-align:center;
 }
 .mob-skip-btn{
@@ -642,7 +660,7 @@ button, [role="button"]{-webkit-tap-highlight-color:transparent}
 
 /* ── 详情页（答错 / 第一次答对） ─────────────────────── */
 .mob-detail-body{
-  padding:26px 20px 0;
+  padding:26px 16px 0;
   flex:1;
   min-height:0;
   overflow-y:auto;
