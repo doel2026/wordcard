@@ -1,5 +1,5 @@
 /* app.js —— 由 build/concat.py 拼接，禁止手改。
-   内容哈希：2078e6f891  prod  22 个文件
+   内容哈希：3995cfb98e  prod  22 个文件
    顺序见 build/manifest.json */
 
 /* ──────── src/ui/shared/dom.js ──────── */
@@ -223,8 +223,9 @@
 
   /* 分析页：四个数字（作答 / 正确率 / 平均反应 / 连续天数） */
   function statMetrics(items) {
-    var wrap = h("div", { class: "wc-stat-metrics" });
-    (items || []).forEach(function (it) {
+    var list = items || [];
+    var wrap = h("div", { class: "wc-stat-metrics" + (list.length === 3 ? " is-3" : "") });
+    list.forEach(function (it) {
       wrap.appendChild(
         h(
           "div",
@@ -1007,7 +1008,7 @@
         h("div", { class: "mob-title", text: "分析" }),
         h("div", {
           class: "mob-stats-sub",
-          text: "只统计「" + vm.book.name + "」· " + (has ? S.totals.days + " 天记录" : "本地答题日志")
+          text: "按「" + vm.book.name + "」· " + (has ? S.totals.days + " 天记录" : "本地答题日志")
         })
       )
     );
@@ -1018,7 +1019,7 @@
           h("div", { class: "mob-stat-empty-t", text: "还没有答题记录" }),
           h("div", {
             class: "mob-stat-empty-s",
-            text: "背几道题，这里就会出现正确率、高效时段和反复错的词。"
+            text: "背几道题，这里就会出现正确率、时段分布和 14 天走势。"
           }),
           h(
             "div",
@@ -1037,27 +1038,27 @@
     page.appendChild(
       statCard([
         WC.ui.statMetrics([
-          { value: S.totals.n, label: "累计作答", sub: "共 " + S.totals.days + " 天" },
+          { value: S.totals.n, label: "累计作答", sub: "本书 " + S.totals.days + " 天" },
           { value: S.totals.rate + "%", label: "正确率", sub: "错 " + S.totals.wrong + " 次" },
-          { value: S.totals.avgText, label: "平均反应", sub: "出题到作答" },
           { value: S.totals.streak + " 天", label: "连续学习", sub: "今天没练会断" }
         ])
       ])
     );
 
     var when = statCard([
-      statHead("时段效率", S.bestHour ? S.bestHour.text : "样本还不够"),
-      WC.ui.statChart({ cols: S.hours, ariaLabel: "24 小时答题量与正确率" }),
+      statHead("时段效率", S.peakHour ? S.peakHour.text : "样本还不够"),
+      WC.ui.statChart({ cols: S.hours, ariaLabel: "24 小时答题占比，全部词本合计" }),
       statAxis(["0 点", "6 点", "12 点", "18 点", "23 点"]),
       h("div", {
         class: "wc-stat-cap",
-        text: "柱高 = 题量，颜色越深正确率越高；少于 5 题不评「最稳时段」。"
+        text: "柱高 = 占全部作答的比例（全部词本合计 " + S.hourTotal +
+          " 题）；颜色越深越准，少于 5 题不下结论。"
       }),
       h(
         "div",
         { class: "wc-stat-block" },
         statHead("星期节奏", ""),
-        WC.ui.statChart({ cols: S.week, ariaLabel: "周一到周日答题量与正确率" }),
+        WC.ui.statChart({ cols: S.week, ariaLabel: "周一到周日答题占比，全部词本合计" }),
         statAxis(["周一", "周二", "周三", "周四", "周五", "周六", "周日"])
       )
     ]);
@@ -1076,26 +1077,6 @@
           h("span", { class: "wc-stat-dot is-weak" }),
           h("span", { text: "<50%" })
         ])
-      ])
-    );
-
-    page.appendChild(
-      statCard([
-        statHead("真不会的词", S.hard.length ? "错 ≥2 次" : ""),
-        S.hard.length
-          ? WC.ui.statRows(S.hard)
-          : h("div", { class: "wc-stat-cap", text: "还没有反复错的词，继续保持。" })
-      ])
-    );
-
-    page.appendChild(
-      statCard([
-        statHead("反应最慢", S.slow.length ? "≥3 次 · ≥3 秒" : ""),
-        S.slow.length
-          ? WC.ui.statRows(S.slow.map(function (r) {
-              return { w: r.w, pos: r.pos, cn: r.cn, text: r.avgText };
-            }))
-          : h("div", { class: "wc-stat-cap", text: "样本还不够，多背几轮再看。" })
       ])
     );
 
@@ -1742,7 +1723,7 @@
         h("div", { class: "desk-plain-h", text: "分析" }),
         h("div", {
           class: "desk-stats-sub",
-          text: "只统计「" + vm.book.name + "」· " + (has ? S.totals.days + " 天记录" : "本地答题日志")
+          text: "按「" + vm.book.name + "」· " + (has ? S.totals.days + " 天记录" : "本地答题日志")
         })
       )
     );
@@ -1772,27 +1753,27 @@
     wrap.appendChild(
       statCard([
         WC.ui.statMetrics([
-          { value: S.totals.n, label: "累计作答", sub: "共 " + S.totals.days + " 天" },
+          { value: S.totals.n, label: "累计作答", sub: "本书 " + S.totals.days + " 天" },
           { value: S.totals.rate + "%", label: "正确率", sub: "错 " + S.totals.wrong + " 次" },
-          { value: S.totals.avgText, label: "平均反应", sub: "出题到作答" },
           { value: S.totals.streak + " 天", label: "连续学习", sub: "今天没练会断" }
         ])
       ])
     );
 
     var when = statCard([
-      statHead("时段效率", S.bestHour ? S.bestHour.text : "样本还不够"),
-      WC.ui.statChart({ cols: S.hours, ariaLabel: "24 小时答题量与正确率" }),
+      statHead("时段效率", S.peakHour ? S.peakHour.text : "样本还不够"),
+      WC.ui.statChart({ cols: S.hours, ariaLabel: "24 小时答题占比，全部词本合计" }),
       statAxis(["0 点", "6 点", "12 点", "18 点", "23 点"]),
       h("div", {
         class: "wc-stat-cap",
-        text: "柱高 = 题量，颜色越深正确率越高；少于 5 题不评「最稳时段」。"
+        text: "柱高 = 占全部作答的比例（全部词本合计 " + S.hourTotal +
+          " 题）；颜色越深越准，少于 5 题不下结论。"
       }),
       h(
         "div",
         { class: "wc-stat-block" },
         statHead("星期节奏", ""),
-        WC.ui.statChart({ cols: S.week, ariaLabel: "周一到周日答题量与正确率" }),
+        WC.ui.statChart({ cols: S.week, ariaLabel: "周一到周日答题占比，全部词本合计" }),
         statAxis(["周一", "周二", "周三", "周四", "周五", "周六", "周日"])
       )
     ]);
@@ -1811,28 +1792,12 @@
       ])
     ]);
 
-    var hard = statCard([
-      statHead("真不会的词", S.hard.length ? "错 ≥2 次" : ""),
-      S.hard.length
-        ? WC.ui.statRows(S.hard)
-        : h("div", { class: "wc-stat-cap", text: "还没有反复错的词，继续保持。" })
-    ]);
-
-    var slow = statCard([
-      statHead("反应最慢", S.slow.length ? "≥3 次 · ≥3 秒" : ""),
-      S.slow.length
-        ? WC.ui.statRows(S.slow.map(function (r) {
-            return { w: r.w, pos: r.pos, cn: r.cn, text: r.avgText };
-          }))
-        : h("div", { class: "wc-stat-cap", text: "样本还不够，多背几轮再看。" })
-    ]);
-
     wrap.appendChild(
       h(
         "div",
         { class: "desk-stats-grid" },
-        h("div", { class: "desk-stats-col" }, when, trend),
-        h("div", { class: "desk-stats-col" }, hard, slow)
+        h("div", { class: "desk-stats-col" }, when),
+        h("div", { class: "desk-stats-col" }, trend)
       )
     );
     wrap.appendChild(
@@ -2590,21 +2555,32 @@
 })(typeof globalThis !== "undefined" ? globalThis : this);
 
 /* ──────── src/core/analysis.js ──────── */
-/* analysis.js —— P7 分析（contract §6.2）：纯函数，吃日志吐统计，零 DOM。
-   只做「从 LogEvent 里能直接算出来的事」，不猜：哪些词反复错、哪个时段正确率高、
-   最近 14 天什么走势。判定口径与 §2.6 / §3 一致：
+/* analysis.js —— P7 分析（contract §6.2 / v1.11）：纯函数，吃日志吐统计，零 DOM。
+   只做「从 LogEvent 里能直接算出来的事」，不猜。判定口径与 §2.6 / §3 一致：
      - pick / skip 算一次作答，skip 与选错等价（ok:0）；
      - master 是手动标掌握，计入动作数，但不计正确率（没经过四选一）；
-     - undo 只记账，不参与任何统计。 */
+     - undo 只记账，不参与任何统计。
+
+   v1.11 三处口径调整（用户 2026-11-24 决定）：
+     1. 不再产出任何「反应时间」类指标。e.ms 是「卡片出现到作答」的间隔，
+        中途走开 / 切窗口 / 息屏都会记成几十秒，只有 150ms 下限、没有上限，
+        所以「平均反应」「反应最慢」量的是我什么时候离开过，不是哪个词不熟。
+     2. 时段（24 小时）与星期改为**跨词本**累计，并给出「占全部作答的百分比」。
+        回答的是「我习惯在每天哪个时间背、那时候占多少」——跟具体哪本书无关。
+        其余指标（累计作答 / 正确率 / 连续天数 / 14 天走势）仍按当前词本。
+     3. 结论从「正确率最高的时段」改为「题量最大的时段」，因为前者答的是
+        「哪段最准」，而用户要的是「哪段最常背」。
+     4. 连续学习天数改为**跨词本**：它衡量的是「我这个人有没有坚持」，
+        交替背两本书不该把连续记录打断。`totals.days`（本书有记录的天数）仍按书算。
+     - hard（真不会）继续算、继续返回，但 UI 暂不展示（用户说 app 化后再做功能）。 */
 (function (root) {
   "use strict";
   var WC = (root.WC = root.WC || {});
   var core = (WC.core = WC.core || {});
 
   var WEEK = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
-  var HARD_CAP = 8;    // 「真不会」最多列 8 个词
-  var SLOW_CAP = 5;    // 「反应最慢」最多列 5 个词
-  var BEST_MIN = 5;    // 时段样本少于 5 题不评「最稳时段」
+  var HARD_CAP = 8;    // 「真不会」最多列 8 个词（暂不展示，保留数据）
+  var PEAK_MIN = 5;    // 时段样本少于 5 题不下结论，避免 1 题 100% 的噪声
   var DAYS = 14;       // 最近 14 天
 
   function rateOf(ok, n) {
@@ -2616,10 +2592,6 @@
     if (rate >= 80) return "strong";
     if (rate >= 50) return "mid";
     return "weak";
-  }
-
-  function avgText(ms) {
-    return ms > 0 ? (ms / 1000).toFixed(1) + " 秒" : "—";
   }
 
   /* "YYYY-MM-DD" 加减天数。用本地 Date 构造器做日历运算，不取「现在」。 */
@@ -2657,45 +2629,48 @@
     var words = opts.words || {};
     var entries = core.log.entries(log);
 
-    var hours = emptySeries(24);
-    var week = emptySeries(7);
-    var days = {};
+    var hours = emptySeries(24);   // 24 小时：跨词本
+    var week = emptySeries(7);     // 星期：跨词本
+    var hourTotal = 0;             // 时段百分比的分母 = 所有词本的作答题数
+    var days = {};       // 当前词本有记录的天（给 totals.days 用）
+    var allDays = {};    // 所有词本有记录的天（给 streak 用）
     var byWord = {};
-    var totals = { n: 0, ok: 0, wrong: 0, actions: 0, msSum: 0, msN: 0 };
+    var totals = { n: 0, ok: 0, wrong: 0, actions: 0 };
     var firstAt = 0;
     var lastAt = 0;
 
     for (var i = 0; i < entries.length; i++) {
       var e = entries[i];
       if (!e || (e.k !== "pick" && e.k !== "skip" && e.k !== "master")) continue;
-      if (bookId && e.b && e.b !== bookId) continue;
-
+      /* 这本书 vs 别的书：只有「时段 / 星期」不分书，其余都只认当前词本 */
+      var inBook = !bookId || !e.b || e.b === bookId;
       var t = Number(e.t) || 0;
+
+      /* 连续天数不分书：哪天动过笔就算哪天 */
       if (t > 0) {
-        if (!firstAt || t < firstAt) firstAt = t;
-        if (t > lastAt) lastAt = t;
+        var dAll = core.derive.dayOf(t);
+        if (dAll) allDays[dAll] = true;
       }
-      var d = t > 0 ? core.derive.dayOf(t) : "";
-      if (d) days[d] = true;
-      totals.actions++;
+
+      if (inBook) {
+        if (t > 0) {
+          if (!firstAt || t < firstAt) firstAt = t;
+          if (t > lastAt) lastAt = t;
+          var d0 = core.derive.dayOf(t);
+          if (d0) days[d0] = true;
+        }
+        totals.actions++;
+      }
 
       if (e.k === "master") continue; // 手动标掌握不算一次四选一
 
       var ok = e.ok === 1 ? 1 : 0;
-      totals.n++;
-      totals.ok += ok;
-      if (!ok) totals.wrong++;
 
-      var ms = Number(e.ms);
-      if (isFinite(ms) && ms > 0) {
-        totals.msSum += ms;
-        totals.msN++;
-      }
-
-      if (d) {
+      /* 时段 / 星期：不分词本，全部作答一起算 */
+      hourTotal++;
+      if (t > 0) {
         var dt = new Date(t * 1000);
-        var h = dt.getHours();
-        var hb = hours[h];
+        var hb = hours[dt.getHours()];
         hb.n++;
         hb.ok += ok;
         var wd = (dt.getDay() + 6) % 7;
@@ -2703,16 +2678,17 @@
         week[wd].ok += ok;
       }
 
+      if (!inBook) continue;
+
+      totals.n++;
+      totals.ok += ok;
+      if (!ok) totals.wrong++;
+
       var wid = e.w;
       if (!wid) continue;
-      var ws = byWord[wid] || (byWord[wid] = { tries: 0, wrong: 0, msSum: 0, msN: 0, lastAt: 0 });
+      var ws = byWord[wid] || (byWord[wid] = { tries: 0, wrong: 0 });
       ws.tries++;
       if (!ok) ws.wrong++;
-      if (isFinite(ms) && ms > 0) {
-        ws.msSum += ms;
-        ws.msN++;
-      }
-      if (t > ws.lastAt) ws.lastAt = t;
     }
 
     var today = typeof opts.today === "string" && opts.today
@@ -2723,17 +2699,17 @@
     for (var dk in days) if (days[dk]) dayList.push(dk);
     dayList.sort();
 
-    /* 连续学习天数：从今天（今天没练就从昨天）往前数 */
+    /* 连续学习天数：从今天（今天没练就从昨天）往前数。跨词本——衡量习惯，不是衡量哪本书。 */
     var streak = 0;
     if (today) {
-      var cursor = days[today] ? today : dayShift(today, -1);
-      while (days[cursor]) {
+      var cursor = allDays[today] ? today : dayShift(today, -1);
+      while (allDays[cursor]) {
         streak++;
         cursor = dayShift(cursor, -1);
       }
     }
 
-    /* 最近 14 天 */
+    /* 最近 14 天：按当前词本 */
     var daily = [];
     for (var k = DAYS - 1; k >= 0; k--) {
       var day = today ? dayShift(today, -k) : "";
@@ -2754,18 +2730,26 @@
       }
     }
 
+    /* 时段占比：把「每个小时有多少题」换成「占全部作答的百分之几」 */
+    var shareOf = function (n) {
+      return hourTotal > 0 ? Math.round((n / hourTotal) * 100) : 0;
+    };
+
     var hb2;
     for (i = 0; i < 24; i++) {
       hb2 = hours[i];
       hb2.h = i;
       hb2.label = i + " 点";
-      hb2.title = hb2.n ? i + " 点 · " + hb2.n + " 题 · " + rateOf(hb2.ok, hb2.n) + "%" : i + " 点 · 无记录";
+      hb2.share = shareOf(hb2.n);
+      hb2.title = hb2.n
+        ? i + " 点 · " + hb2.n + " 题 · 占 " + hb2.share + "% · 正确率 " + rateOf(hb2.ok, hb2.n) + "%"
+        : i + " 点 · 无记录";
     }
     for (i = 0; i < 7; i++) {
       week[i].d = i;
       week[i].label = WEEK[i];
       week[i].title = WEEK[i] + " · " + week[i].n + " 题" +
-        (week[i].n ? " · " + rateOf(week[i].ok, week[i].n) + "%" : "");
+        (week[i].n ? " · 占 " + shareOf(week[i].n) + "% · " + rateOf(week[i].ok, week[i].n) + "%" : "");
     }
     for (i = 0; i < daily.length; i++) {
       daily[i].title = (daily[i].date || "—") + " · " + daily[i].n + " 题" +
@@ -2776,49 +2760,37 @@
     decorate(week);
     decorate(daily);
 
-    var bestHour = null;
+    /* 结论：题量最大的时段（不是正确率最高的那段）。
+       「我习惯什么时候背」是题量问题；「那段准不准」是另一个问题，用 rate 一并给出。 */
+    var peak = null;
     for (i = 0; i < 24; i++) {
-      if (hours[i].n < BEST_MIN) continue;
-      if (!bestHour || hours[i].rate > bestHour.rate ||
-          (hours[i].rate === bestHour.rate && hours[i].n > bestHour.n)) {
-        bestHour = hours[i];
-      }
+      var hc = hours[i];
+      if (hc.n < PEAK_MIN) continue;
+      if (!peak || hc.n > peak.n || (hc.n === peak.n && hc.rate > peak.rate)) peak = hc;
     }
 
     var hard = [];
-    var slow = [];
     for (var wid2 in byWord) {
-      var s = byWord[wid2];
+      var st = byWord[wid2];
       var meta = words[wid2] || {};
-      var entry = {
+      var row = {
         w: wid2,
         pos: meta.pos || "",
         cn: meta.cn || "",
         g: meta.g || 0,
-        tries: s.tries,
-        wrong: s.wrong,
-        rate: rateOf(s.tries - s.wrong, s.tries),
-        avgMs: s.msN ? Math.round(s.msSum / s.msN) : 0
+        tries: st.tries,
+        wrong: st.wrong,
+        rate: rateOf(st.tries - st.wrong, st.tries)
       };
-      entry.avgText = avgText(entry.avgMs);
-      entry.text = "错 " + s.wrong + " / " + s.tries + " 次";
-      /* 「真不会」至少错两次、且错率不低；只错一次可能是手滑，不放进榜单。
-         「最慢」除了至少 3 次，平均反应要真的慢（>= 3 秒），否则排第一的可能是
-         一个只用了 2.3 秒的词——那不叫慢，叫样本少。 */
-      if (s.wrong >= 2 && entry.rate <= 60) hard.push(entry);
-      if (s.tries >= 3 && entry.avgMs >= 3000) slow.push(entry);
+      row.text = "错 " + st.wrong + " / " + st.tries + " 次";
+      /* 「真不会」至少错两次、且错率不低；只错一次可能是手滑，不放进榜单。 */
+      if (st.wrong >= 2 && row.rate <= 60) hard.push(row);
     }
     hard.sort(function (a, b) {
       return b.wrong - a.wrong || a.rate - b.rate || b.tries - a.tries ||
         (a.w < b.w ? -1 : a.w > b.w ? 1 : 0);
     });
-    slow.sort(function (a, b) {
-      return b.avgMs - a.avgMs || b.tries - a.tries || (a.w < b.w ? -1 : a.w > b.w ? 1 : 0);
-    });
     hard = hard.slice(0, HARD_CAP);
-    slow = slow.slice(0, SLOW_CAP);
-
-    var avgMs = totals.msN ? Math.round(totals.msSum / totals.msN) : 0;
 
     return {
       totals: {
@@ -2829,19 +2801,18 @@
         actions: totals.actions,
         days: dayList.length,
         streak: streak,
-        avgMs: avgMs,
-        avgText: avgText(avgMs),
         firstAt: firstAt,
         lastAt: lastAt
       },
-      bestHour: bestHour
-        ? { h: bestHour.h, n: bestHour.n, rate: bestHour.rate, text: bestHour.h + " 点 · " + bestHour.rate + "%" }
+      hourTotal: hourTotal,
+      peakHour: peak
+        ? { h: peak.h, n: peak.n, share: peak.share, rate: peak.rate,
+            text: peak.h + " 点 · 占 " + peak.share + "%" }
         : null,
       hours: hours,
       week: week,
       daily: daily,
-      hard: hard,
-      slow: slow
+      hard: hard
     };
   }
 
