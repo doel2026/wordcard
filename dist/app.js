@@ -1,5 +1,5 @@
 /* app.js —— 由 build/concat.py 拼接，禁止手改。
-   内容哈希：6d63760a90  dev  22 个文件
+   内容哈希：13532158b2  dev  23 个文件
    顺序见 build/manifest.json */
 
 /* ──────── src/ui/shared/dom.js ──────── */
@@ -112,6 +112,23 @@
     );
   }
 
+  /* 读音键：单词 / 例句 / 以后加的同族词都用它。
+     text 由调用方通过 dispatch({type:"speak", text}) 指定，组件本身不认识业务。 */
+  function speakButton(o) {
+    var label = o.label || "朗读";
+    return h(
+      "button",
+      {
+        class: "wc-speak" + (o.small ? " is-small" : ""),
+        type: "button",
+        "aria-label": label,
+        title: label,
+        on: { click: o.onClick || null }
+      },
+      icon("sound")
+    );
+  }
+
   /* 按钮 */
   function button(o) {
     var kind = o.kind === "quiet" ? "is-quiet" : "is-primary";
@@ -204,36 +221,158 @@
     return { close: close };
   }
 
+  /* 分析页：四个数字（作答 / 正确率 / 平均反应 / 连续天数） */
+  function statMetrics(items) {
+    var wrap = h("div", { class: "wc-stat-metrics" });
+    (items || []).forEach(function (it) {
+      wrap.appendChild(
+        h(
+          "div",
+          { class: "wc-stat-metric" },
+          h("div", { class: "wc-stat-v", text: String(it.value) }),
+          h("div", { class: "wc-stat-k", text: it.label }),
+          it.sub ? h("div", { class: "wc-stat-sub", text: it.sub }) : null
+        )
+      );
+    });
+    return wrap;
+  }
+
+  /* 柱状图：柱高与档位全部由 VM 给（pct / tone），这里只负责画 */
+  function statChart(o) {
+    var wrap = h("div", {
+      class: "wc-stat-chart" + (o.cls ? " " + o.cls : ""),
+      role: "img",
+      "aria-label": o.ariaLabel || ""
+    });
+    (o.cols || []).forEach(function (c) {
+      wrap.appendChild(
+        h(
+          "div",
+          { class: "wc-stat-col", title: c.title || "" },
+          h(
+            "div",
+            { class: "wc-stat-track" },
+            h("i", {
+              class: "wc-stat-fill is-" + (c.tone || "none"),
+              style: { height: (c.pct || 0) + "%" }
+            })
+          )
+        )
+      );
+    });
+    return wrap;
+  }
+
+  /* 「真不会 / 反应最慢」两栏列表 */
+  function statRows(rows) {
+    var wrap = h("div", { class: "wc-stat-rows" });
+    (rows || []).forEach(function (r) {
+      wrap.appendChild(
+        h(
+          "div",
+          { class: "wc-stat-row" },
+          h(
+            "span",
+            { class: "wc-stat-row-w" },
+            h("span", { text: r.w }),
+            r.pos ? h("em", { text: r.pos }) : null
+          ),
+          h("span", { class: "wc-stat-row-cn", text: r.cn || "" }),
+          h("span", { class: "wc-stat-row-n", text: r.text })
+        )
+      );
+    });
+    return wrap;
+  }
+
   /* 「叮」：用 WebAudio 现合成，不带音频文件。
      必须在用户手势之后创建/恢复 AudioContext，所以调用点是答题那一刻。 */
   var dingCtx = null;
-  function ding() {
+  var audioUnlocked = false;
+
+  function ensureAudio() {
     try {
       var Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) return;
+      if (!Ctx) return null;
       if (!dingCtx) dingCtx = new Ctx();
-      if (dingCtx.state === "suspended") dingCtx.resume();
-      var t0 = dingCtx.currentTime;
-      [1046.5, 1568].forEach(function (freq, i) {
-        var o = dingCtx.createOscillator();
-        var g = dingCtx.createGain();
-        o.type = "sine";
-        o.frequency.value = freq;
-        var at = t0 + i * 0.03;
-        g.gain.setValueAtTime(0.0001, at);
-        g.gain.exponentialRampToValueAtTime(i ? 0.06 : 0.16, at + 0.008);
-        g.gain.exponentialRampToValueAtTime(0.0001, at + 0.22);
-        o.connect(g);
-        g.connect(dingCtx.destination);
-        o.start(at);
-        o.stop(at + 0.24);
-      });
+      return dingCtx;
     } catch (e) {
-      /* 没有音频设备就当没这回事，不打断背单词 */
+      return null;
     }
   }
 
-  WC.ui = { icon: icon, option: option, button: button, cells: cells, rows: rows, toast: toast, sheet: sheet, ding: ding };
+  /* 浏览器要求音频上下文在用户手势里创建/恢复；先点/按一下就把通道打开，
+     之后答题的提示音才不会「时响时不响」。 */
+  function unlockAudio() {
+    if (audioUnlocked) return;
+    audioUnlocked = true;
+    var ctx = ensureAudio();
+    if (!ctx || ctx.state === "running") return;
+    try {
+      var p = ctx.resume();
+      if (p && p.catch) p.catch(function () {});
+    } catch (e) {
+      /* 没有音频设备就静默 */
+    }
+  }
+
+  function beep(ctx, freq, at, dur, peak, type) {
+    var o = ctx.createOscillator();
+    var g = ctx.createGain();
+    o.type = type || "sine";
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(peak, at + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    o.connect(g);
+    g.connect(ctx.destination);
+    o.start(at);
+    o.stop(at + dur + 0.02);
+  }
+
+  /* 提示音：答对用原来的高音「叮」，答错用两声低音；kind 省略时按答对处理。
+     用 WebAudio 现合成，不带音频文件。 */
+  function ding(kind) {
+    var ctx = ensureAudio();
+    if (!ctx) return;
+    var play = function () {
+      try {
+        var t0 = ctx.currentTime + 0.01;
+        if (kind === "wrong") {
+          beep(ctx, 196, t0, 0.16, 0.12, "triangle");
+          beep(ctx, 146.8, t0 + 0.1, 0.2, 0.1, "triangle");
+        } else {
+          beep(ctx, 1046.5, t0, 0.22, 0.16, "sine");
+          beep(ctx, 1568, t0 + 0.03, 0.22, 0.06, "sine");
+        }
+      } catch (e) {
+        /* 没有音频设备就当没这回事，不打断背单词 */
+      }
+    };
+    try {
+      if (ctx.state === "running") {
+        play();
+        return;
+      }
+      var p = ctx.resume();
+      if (p && p.then) p.then(play).catch(function () {});
+      else play();
+    } catch (e) {
+      /* 静默降级 */
+    }
+  }
+
+  if (typeof document !== "undefined" && document.addEventListener) {
+    document.addEventListener("pointerdown", unlockAudio, true);
+    document.addEventListener("keydown", unlockAudio, true);
+  }
+
+  WC.ui = {
+    icon: icon, option: option, button: button, speakButton: speakButton,
+    cells: cells, rows: rows, toast: toast, sheet: sheet, ding: ding,
+    statMetrics: statMetrics, statChart: statChart, statRows: statRows
+  };
 })(window.WC = window.WC || {});
 
 /* ──────── src/ui/preview/fixtures.js ──────── */
@@ -380,6 +519,75 @@
     return out;
   }
 
+  /* 分析页样板数据：只为了把「数字 / 柱状图 / 排行」画出来，不是真统计。
+     真口径在 src/core/analysis.js（P7），preview 不进发布产物。 */
+  function sampleStats() {
+    function bars(n, pick) {
+      var out = [];
+      var max = 0;
+      var i;
+      for (i = 0; i < n; i++) {
+        var b = pick(i);
+        out.push(b);
+        if (b.n > max) max = b.n;
+      }
+      for (i = 0; i < n; i++) {
+        var x = out[i];
+        x.rate = x.n ? Math.round((x.ok / x.n) * 100) : 0;
+        x.tone = !x.n ? "none" : x.rate >= 80 ? "strong" : x.rate >= 50 ? "mid" : "weak";
+        x.pct = x.n && max ? Math.max(6, Math.round((x.n / max) * 100)) : 0;
+      }
+      return out;
+    }
+
+    var hours = bars(24, function (i) {
+      var n = [0, 0, 0, 0, 0, 0, 2, 6, 14, 12, 8, 6, 4, 2, 0, 2, 10, 16, 14, 11, 7, 4, 1, 0][i];
+      return { h: i, n: n, ok: Math.round(n * (i >= 15 && i <= 18 ? 0.86 : 0.7)),
+        label: i + " 点", title: i + " 点 · " + n + " 题" };
+    });
+    var week = bars(7, function (i) {
+      var n = [44, 38, 51, 46, 40, 62, 55][i];
+      return { d: i, n: n, ok: Math.round(n * [0.74, 0.71, 0.79, 0.76, 0.7, 0.83, 0.8][i]),
+        label: ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][i] };
+    });
+    var daily = bars(14, function (i) {
+      var n = [12, 0, 18, 24, 16, 30, 22, 8, 0, 26, 34, 28, 40, 36][i];
+      return { date: "2026-11-" + String(11 + i), label: "11-" + String(11 + i),
+        n: n, ok: Math.round(n * (0.68 + (i % 5) * 0.03)) };
+    });
+    var total = daily.reduce(function (a, b) { return a + b.n; }, 0) + 120;
+
+    return {
+      totals: {
+        n: total,
+        ok: Math.round(total * 0.78),
+        wrong: total - Math.round(total * 0.78),
+        rate: 78,
+        actions: total + 4,
+        days: 12,
+        streak: 4,
+        avgMs: 3200,
+        avgText: "3.2 秒",
+        firstAt: 1762000000,
+        lastAt: 1763900000
+      },
+      bestHour: { h: 15, n: 42, rate: 86, text: "15 点 · 86%" },
+      hours: hours,
+      week: week,
+      daily: daily,
+      hard: [
+        { w: "abandon", pos: "v.", cn: "放弃；遗弃", g: 1, tries: 6, wrong: 4, rate: 33, avgMs: 4100, avgText: "4.1 秒", text: "错 4 / 6 次" },
+        { w: "absurd", pos: "a.", cn: "荒谬的，荒唐的", g: 1, tries: 5, wrong: 3, rate: 40, avgMs: 3600, avgText: "3.6 秒", text: "错 3 / 5 次" },
+        { w: "adequate", pos: "a.", cn: "充足的，适当的", g: 2, tries: 4, wrong: 2, rate: 50, avgMs: 2900, avgText: "2.9 秒", text: "错 2 / 4 次" }
+      ],
+      slow: [
+        { w: "accompany", pos: "v.", cn: "陪伴，伴随；伴奏", g: 1, tries: 5, wrong: 1, rate: 80, avgMs: 6400, avgText: "6.4 秒", text: "6.4 秒" },
+        { w: "accelerate", pos: "v.", cn: "加速；促进", g: 1, tries: 4, wrong: 1, rate: 75, avgMs: 5200, avgText: "5.2 秒", text: "5.2 秒" },
+        { w: "academic", pos: "a.", cn: "学院的，学术的", g: 1, tries: 6, wrong: 0, rate: 100, avgMs: 4300, avgText: "4.3 秒", text: "4.3 秒" }
+      ]
+    };
+  }
+
   /* 主入口：拼一份完整 VM */
   function makeVM(over) {
     over = over || {};
@@ -396,17 +604,21 @@
       counts: {
         today: 20,
         review: 4,
+        learning: 96,
         fav: 12,
         mastered: 812,
         total: 1279,
         group: { g: 1, mastered: 37, size: 92 }
       },
       learn: route === "learn" ? learnVM(over) : null,
+      list: null,
+      stats: route === "stats" ? sampleStats() : null,
       groups: cellsVM(),
       library: {
         rows: [
           { key: "fav", label: "收藏", n: 12 },
           { key: "review", label: "待复习", n: 4 },
+          { key: "learning", label: "学习中", n: 96 },
           { key: "all", label: "全部", n: 1279 }
         ]
       },
@@ -549,7 +761,7 @@
         toast("备注先存本地，导入时一起带走");
       },
       goto: function (a) {
-        if (a.route !== "learn" && a.route !== "library" && a.route !== "me") return;
+        if (a.route !== "learn" && a.route !== "library" && a.route !== "me" && a.route !== "stats") return;
         st.route = a.route;
       },
       pickGroup: function (a) {
@@ -623,7 +835,7 @@
   /* ── 小工具 ─────────────────────────────────────────── */
 
   function tabBar(route, dispatch) {
-    var items = [["learn", "学习"], ["library", "词库"], ["me", "我的"]];
+    var items = [["learn", "学习"], ["library", "词库"], ["stats", "分析"], ["me", "我的"]];
     var bar = h("nav", { class: "mob-tabs", role: "tablist", "aria-label": "主导航" });
     items.forEach(function (it) {
       var on = route === it[0] || (it[0] === "library" && route === "list");
@@ -676,7 +888,6 @@
       "div",
       { class: "mob-ics" },
       btn("star", on.starOn ? "取消收藏" : "收藏", on.onFav),
-      btn("sound", "朗读", on.onSpeak),
       more
     );
   }
@@ -686,9 +897,16 @@
     if (!word) return {};
     return {
       starOn: !!word.fav,
-      onFav: function () { dispatch({ type: word.fav ? "unfav" : "fav" }); },
-      onSpeak: function () { dispatch({ type: "speak" }); }
+      onFav: function () { dispatch({ type: word.fav ? "unfav" : "fav" }); }
     };
+  }
+
+  function speakKey(dispatch, text, label, small) {
+    return WC.ui.speakButton({
+      label: label || "朗读 " + text,
+      small: !!small,
+      onClick: function () { dispatch({ type: "speak", text: text }); }
+    });
   }
 
   function learnHeader(head, onMore, actions) {
@@ -793,7 +1011,14 @@
     );
 
     var body = h("div", { class: "mob-detail-body" });
-    body.appendChild(h("h1", { class: "mob-word-w", text: w.w }));
+    body.appendChild(
+      h(
+        "div",
+        { class: "mob-word-row" },
+        h("h1", { class: "mob-word-w", text: w.w }),
+        speakKey(dispatch, w.w)
+      )
+    );
     if (w.ph) body.appendChild(h("div", { class: "mob-ph", text: w.ph }));
     body.appendChild(
       h(
@@ -805,7 +1030,14 @@
     );
     if (w.en) {
       var ex = h("div", { class: "mob-detail-ex" });
-      ex.appendChild(h("div", { class: "mob-ex-en", text: w.en }));
+      ex.appendChild(
+        h(
+          "div",
+          { class: "mob-ex-row" },
+          h("div", { class: "mob-ex-en", text: w.en }),
+          speakKey(dispatch, w.en, "朗读例句", true)
+        )
+      );
       if (w.tr) ex.appendChild(h("div", { class: "mob-ex-tr", text: w.tr }));
       body.appendChild(ex);
     }
@@ -846,7 +1078,12 @@
       h(
         "div",
         { class: "mob-word" },
-        h("h1", { class: "mob-word-w", text: learn.word.w }),
+        h(
+          "div",
+          { class: "mob-word-row" },
+          h("h1", { class: "mob-word-w", text: learn.word.w }),
+          speakKey(dispatch, learn.word.w)
+        ),
         learn.word.ph ? h("div", { class: "mob-ph", text: learn.word.ph }) : null
       )
     );
@@ -946,7 +1183,7 @@
     var card = h("div", { class: "wc-card mob-list-card" });
     if (!L.words.length) {
       card.appendChild(
-        h("div", { class: "mob-empty", text: L.key === "review" ? "没有待复习的词，很干净" : "这里是空的" })
+        h("div", { class: "mob-empty", text: L.key === "review" ? "没有待复习的词，很干净" : L.key === "learning" ? "还没有在学的词" : "这里是空的" })
       );
     } else {
       L.words.forEach(function (w) {
@@ -1181,6 +1418,145 @@
     return page;
   }
 
+  /* ── 分析页（P7） ───────────────────────────────────── */
+
+  function statHead(title, badge) {
+    return h(
+      "div",
+      { class: "wc-stat-head" },
+      h("div", { class: "wc-stat-h", text: title }),
+      badge ? h("span", { class: "wc-stat-badge", text: badge }) : null
+    );
+  }
+
+  function statAxis(labels) {
+    var row = h("div", { class: "wc-stat-axis" });
+    labels.forEach(function (t) {
+      row.appendChild(h("span", { text: t }));
+    });
+    return row;
+  }
+
+  function statCard(children) {
+    var card = h("section", { class: "wc-card mob-card mob-stat-card" });
+    (children || []).forEach(function (c) { if (c) card.appendChild(c); });
+    return card;
+  }
+
+  function statsPage(vm, dispatch) {
+    var S = vm.stats;
+    var page = h("main", { class: "mob-page mob-stats" });
+    var has = !!(S && S.totals && S.totals.n > 0);
+
+    page.appendChild(
+      h(
+        "header",
+        { class: "mob-stats-top" },
+        h("div", { class: "mob-title", text: "分析" }),
+        h("div", {
+          class: "mob-stats-sub",
+          text: "只统计「" + vm.book.name + "」· " + (has ? S.totals.days + " 天记录" : "本地答题日志")
+        })
+      )
+    );
+
+    if (!has) {
+      page.appendChild(
+        statCard([
+          h("div", { class: "mob-stat-empty-t", text: "还没有答题记录" }),
+          h("div", {
+            class: "mob-stat-empty-s",
+            text: "背几道题，这里就会出现正确率、高效时段和反复错的词。"
+          }),
+          h(
+            "div",
+            { class: "mob-stat-empty-cta" },
+            WC.ui.button({
+              label: "去学习",
+              kind: "primary",
+              onClick: function () { dispatch({ type: "goto", route: "learn" }); }
+            })
+          )
+        ])
+      );
+      return page;
+    }
+
+    page.appendChild(
+      statCard([
+        WC.ui.statMetrics([
+          { value: S.totals.n, label: "累计作答", sub: "共 " + S.totals.days + " 天" },
+          { value: S.totals.rate + "%", label: "正确率", sub: "错 " + S.totals.wrong + " 次" },
+          { value: S.totals.avgText, label: "平均反应", sub: "出题到作答" },
+          { value: S.totals.streak + " 天", label: "连续学习", sub: "今天没练会断" }
+        ])
+      ])
+    );
+
+    var when = statCard([
+      statHead("时段效率", S.bestHour ? S.bestHour.text : "样本还不够"),
+      WC.ui.statChart({ cols: S.hours, ariaLabel: "24 小时答题量与正确率" }),
+      statAxis(["0 点", "6 点", "12 点", "18 点", "23 点"]),
+      h("div", {
+        class: "wc-stat-cap",
+        text: "柱高 = 题量，颜色越深正确率越高；少于 5 题不评「最稳时段」。"
+      }),
+      h(
+        "div",
+        { class: "wc-stat-block" },
+        statHead("星期节奏", ""),
+        WC.ui.statChart({ cols: S.week, ariaLabel: "周一到周日答题量与正确率" }),
+        statAxis(["周一", "周二", "周三", "周四", "周五", "周六", "周日"])
+      )
+    ]);
+    page.appendChild(when);
+
+    page.appendChild(
+      statCard([
+        statHead("最近 14 天", S.totals.streak > 1 ? "连 " + S.totals.streak + " 天" : ""),
+        WC.ui.statChart({ cols: S.daily, ariaLabel: "最近 14 天答题量与正确率" }),
+        statAxis(["14 天前", "今天"]),
+        h("div", { class: "wc-stat-legend" }, [
+          h("span", { class: "wc-stat-dot is-strong" }),
+          h("span", { text: "≥80%" }),
+          h("span", { class: "wc-stat-dot" }),
+          h("span", { text: "50–79%" }),
+          h("span", { class: "wc-stat-dot is-weak" }),
+          h("span", { text: "<50%" })
+        ])
+      ])
+    );
+
+    page.appendChild(
+      statCard([
+        statHead("真不会的词", S.hard.length ? "错 ≥2 次" : ""),
+        S.hard.length
+          ? WC.ui.statRows(S.hard)
+          : h("div", { class: "wc-stat-cap", text: "还没有反复错的词，继续保持。" })
+      ])
+    );
+
+    page.appendChild(
+      statCard([
+        statHead("反应最慢", S.slow.length ? "≥3 次 · ≥3 秒" : ""),
+        S.slow.length
+          ? WC.ui.statRows(S.slow.map(function (r) {
+              return { w: r.w, pos: r.pos, cn: r.cn, text: r.avgText };
+            }))
+          : h("div", { class: "wc-stat-cap", text: "样本还不够，多背几轮再看。" })
+      ])
+    );
+
+    page.appendChild(
+      h("div", {
+        class: "mob-stat-foot",
+        text: "数据来自本机答题日志，不上传；手动标掌握不计正确率。"
+      })
+    );
+
+    return page;
+  }
+
   /* ── 全量渲染 ───────────────────────────────────────── */
 
   /* 只换自己的类，保留 app.js 挂在 root 上的 app-root / app-mobile 等 */
@@ -1201,9 +1577,12 @@
   var lastPhase = null;
 
   function render(vm, root, dispatch) {
-    /* 进入 flash 的那一帧「叮」一声；后续重渲染（比如 toast 消失）不再响 */
-    if (vm.learn && vm.learn.phase === "flash" && lastPhase !== "flash") {
-      WC.ui.ding();
+    /* 每次判分（ask → detail/flash）响一次：答对高音、答错 / 跳过低音。
+       后续重渲染（比如 toast 消失）不再响。 */
+    if (vm.learn && (vm.learn.phase === "detail" || vm.learn.phase === "flash") &&
+        lastPhase === "ask") {
+      var wrong = vm.learn.picked !== null && vm.learn.picked !== vm.learn.answer;
+      WC.ui.ding(wrong || vm.learn.skipped ? "wrong" : "right");
     }
     lastPhase = vm.learn ? vm.learn.phase : null;
     root.textContent = "";
@@ -1212,6 +1591,7 @@
     var page;
     if (vm.route === "library") page = libraryPage(vm, dispatch);
     else if (vm.route === "list") page = listPage(vm, dispatch);
+    else if (vm.route === "stats") page = statsPage(vm, dispatch);
     else if (vm.route === "me") page = mePage(vm, dispatch);
     else page = learnPage(vm, dispatch);
 
@@ -1255,11 +1635,20 @@
     if (typeof dispatch === "function") dispatch(action);
   }
 
+  function speakKey(dispatch, text, label, small) {
+    return WC.ui.speakButton({
+      label: label || "朗读 " + text,
+      small: !!small,
+      onClick: function () { send(dispatch, { type: "speak", text: text }); }
+    });
+  }
+
   /* ── 侧栏 ─────────────────────────────────────────────── */
 
   function navAction(key, dispatch) {
     if (key === "today") send(dispatch, { type: "goto", route: "learn" });
     else if (key === "review") send(dispatch, { type: "pickList", key: "review" });
+    else if (key === "learning") send(dispatch, { type: "pickList", key: "learning" });
     else if (key === "fav") send(dispatch, { type: "pickList", key: "fav" });
     else if (key === "mastered") send(dispatch, { type: "pickList", key: "mastered" });
   }
@@ -1301,6 +1690,7 @@
     var items = [
       { key: "today", label: "今天", n: vm.counts.today },
       { key: "review", label: "待复习", n: vm.counts.review },
+      { key: "learning", label: "学习中", n: vm.counts.learning },
       { key: "fav", label: "收藏", n: vm.counts.fav },
       { key: "mastered", label: "已掌握", n: vm.counts.mastered }
     ];
@@ -1349,6 +1739,7 @@
     scroll.appendChild(h("div", { class: "desk-rule" }));
     [
       { route: "library", label: "词库", n: vm.book.groups + " 组" },
+      { route: "stats", label: "分析", n: "" },
       { route: "me", label: "我的", n: "" }
     ].forEach(function (pg) {
       var on = vm.route === pg.route;
@@ -1477,7 +1868,12 @@
     var top = h(
       "div",
       { class: "desk-card-top" },
-      h("div", { class: "desk-word", text: word.w }),
+      h(
+        "div",
+        { class: "desk-word-row" },
+        h("div", { class: "desk-word", text: word.w }),
+        speakKey(dispatch, word.w)
+      ),
       word.ph ? h("div", { class: "desk-ph", text: word.ph }) : null
     );
 
@@ -1498,7 +1894,12 @@
         h(
           "div",
           { class: "desk-ex" },
-          h("div", { class: "desk-ex-en", text: word.en }),
+          h(
+            "div",
+            { class: "desk-ex-row" },
+            h("div", { class: "desk-ex-en", text: word.en }),
+            speakKey(dispatch, word.en, "朗读例句", true)
+          ),
           word.tr ? h("div", { class: "desk-ex-tr", text: word.tr }) : null
         )
       );
@@ -1716,6 +2117,7 @@
       [
         ["今日", vm.counts.today],
         ["待复习", vm.counts.review],
+        ["学习中", vm.counts.learning],
         ["收藏", vm.counts.fav],
         ["已掌握", vm.counts.mastered]
       ].forEach(function (pair) {
@@ -1751,8 +2153,151 @@
     return box;
   }
 
+  /* ── 分析页（P7） ─────────────────────────────────────── */
+
+  function statHead(title, badge) {
+    return h(
+      "div",
+      { class: "wc-stat-head" },
+      h("div", { class: "wc-stat-h", text: title }),
+      badge ? h("span", { class: "wc-stat-badge", text: badge }) : null
+    );
+  }
+
+  function statAxis(labels) {
+    var row = h("div", { class: "wc-stat-axis" });
+    labels.forEach(function (t) {
+      row.appendChild(h("span", { text: t }));
+    });
+    return row;
+  }
+
+  function statCard(children) {
+    var card = h("section", { class: "desk-plain-card desk-stat-card" });
+    (children || []).forEach(function (c) { if (c) card.appendChild(c); });
+    return card;
+  }
+
+  function buildStats(vm, dispatch) {
+    var S = vm.stats;
+    var wrap = h("section", { class: "desk-stats" });
+    var has = !!(S && S.totals && S.totals.n > 0);
+
+    wrap.appendChild(
+      h(
+        "div",
+        { class: "desk-stats-top" },
+        h("div", { class: "desk-plain-h", text: "分析" }),
+        h("div", {
+          class: "desk-stats-sub",
+          text: "只统计「" + vm.book.name + "」· " + (has ? S.totals.days + " 天记录" : "本地答题日志")
+        })
+      )
+    );
+
+    if (!has) {
+      wrap.appendChild(
+        statCard([
+          h("div", { class: "desk-stat-empty-t", text: "还没有答题记录" }),
+          h("div", {
+            class: "desk-stat-empty-s",
+            text: "背几道题，这里就会出现正确率、高效时段和反复错的词。"
+          }),
+          h(
+            "div",
+            { class: "desk-stat-empty-cta" },
+            WC.ui.button({
+              label: "去学习",
+              kind: "primary",
+              onClick: function () { send(dispatch, { type: "goto", route: "learn" }); }
+            })
+          )
+        ])
+      );
+      return wrap;
+    }
+
+    wrap.appendChild(
+      statCard([
+        WC.ui.statMetrics([
+          { value: S.totals.n, label: "累计作答", sub: "共 " + S.totals.days + " 天" },
+          { value: S.totals.rate + "%", label: "正确率", sub: "错 " + S.totals.wrong + " 次" },
+          { value: S.totals.avgText, label: "平均反应", sub: "出题到作答" },
+          { value: S.totals.streak + " 天", label: "连续学习", sub: "今天没练会断" }
+        ])
+      ])
+    );
+
+    var when = statCard([
+      statHead("时段效率", S.bestHour ? S.bestHour.text : "样本还不够"),
+      WC.ui.statChart({ cols: S.hours, ariaLabel: "24 小时答题量与正确率" }),
+      statAxis(["0 点", "6 点", "12 点", "18 点", "23 点"]),
+      h("div", {
+        class: "wc-stat-cap",
+        text: "柱高 = 题量，颜色越深正确率越高；少于 5 题不评「最稳时段」。"
+      }),
+      h(
+        "div",
+        { class: "wc-stat-block" },
+        statHead("星期节奏", ""),
+        WC.ui.statChart({ cols: S.week, ariaLabel: "周一到周日答题量与正确率" }),
+        statAxis(["周一", "周二", "周三", "周四", "周五", "周六", "周日"])
+      )
+    ]);
+
+    var trend = statCard([
+      statHead("最近 14 天", S.totals.streak > 1 ? "连 " + S.totals.streak + " 天" : ""),
+      WC.ui.statChart({ cols: S.daily, ariaLabel: "最近 14 天答题量与正确率" }),
+      statAxis(["14 天前", "今天"]),
+      h("div", { class: "wc-stat-legend" }, [
+        h("span", { class: "wc-stat-dot is-strong" }),
+        h("span", { text: "≥80%" }),
+        h("span", { class: "wc-stat-dot" }),
+        h("span", { text: "50–79%" }),
+        h("span", { class: "wc-stat-dot is-weak" }),
+        h("span", { text: "<50%" })
+      ])
+    ]);
+
+    var hard = statCard([
+      statHead("真不会的词", S.hard.length ? "错 ≥2 次" : ""),
+      S.hard.length
+        ? WC.ui.statRows(S.hard)
+        : h("div", { class: "wc-stat-cap", text: "还没有反复错的词，继续保持。" })
+    ]);
+
+    var slow = statCard([
+      statHead("反应最慢", S.slow.length ? "≥3 次 · ≥3 秒" : ""),
+      S.slow.length
+        ? WC.ui.statRows(S.slow.map(function (r) {
+            return { w: r.w, pos: r.pos, cn: r.cn, text: r.avgText };
+          }))
+        : h("div", { class: "wc-stat-cap", text: "样本还不够，多背几轮再看。" })
+    ]);
+
+    wrap.appendChild(
+      h(
+        "div",
+        { class: "desk-stats-grid" },
+        h("div", { class: "desk-stats-col" }, when, trend),
+        h("div", { class: "desk-stats-col" }, hard, slow)
+      )
+    );
+    wrap.appendChild(
+      h("div", {
+        class: "desk-stats-foot",
+        text: "数据来自本机答题日志，不上传；手动标掌握不计正确率。"
+      })
+    );
+    return wrap;
+  }
+
   function buildMain(vm, dispatch) {
     var main = h("main", { class: "desk-main" });
+    if (vm.stats) {
+      main.appendChild(buildStats(vm, dispatch));
+      return main;
+    }
     if (vm.list) {
       return buildList(vm);
     }
@@ -1812,7 +2357,14 @@
     var card = h("section", { class: "desk-card t-" + themeOf(vm) + " desk-detail" });
 
     var body = h("div", { class: "desk-detail-body" });
-    body.appendChild(h("div", { class: "desk-word", text: w.w }));
+    body.appendChild(
+      h(
+        "div",
+        { class: "desk-word-row" },
+        h("div", { class: "desk-word", text: w.w }),
+        speakKey(dispatch, w.w)
+      )
+    );
     if (w.ph) body.appendChild(h("div", { class: "desk-ph", text: w.ph }));
     body.appendChild(
       h(
@@ -1827,7 +2379,12 @@
         h(
           "div",
           { class: "desk-ex desk-detail-ex" },
-          h("div", { class: "desk-ex-en", text: w.en }),
+          h(
+            "div",
+            { class: "desk-ex-row" },
+            h("div", { class: "desk-ex-en", text: w.en }),
+            speakKey(dispatch, w.en, "朗读例句", true)
+          ),
           w.tr ? h("div", { class: "desk-ex-tr", text: w.tr }) : null
         )
       );
@@ -1853,7 +2410,11 @@
 
   function render(vm, root, dispatch) {
     if (!vm || !root) return;
-    if (vm.learn && vm.learn.phase === "flash" && lastPhase !== "flash") WC.ui.ding();
+    if (vm.learn && (vm.learn.phase === "detail" || vm.learn.phase === "flash") &&
+        lastPhase === "ask") {
+      var wrong = vm.learn.picked !== null && vm.learn.picked !== vm.learn.answer;
+      WC.ui.ding(wrong || vm.learn.skipped ? "wrong" : "right");
+    }
     lastPhase = vm.learn ? vm.learn.phase : null;
     currentVM = vm;
 
@@ -2476,6 +3037,265 @@
   };
 })(typeof globalThis !== "undefined" ? globalThis : this);
 
+/* ──────── src/core/analysis.js ──────── */
+/* analysis.js —— P7 分析（contract §6.2）：纯函数，吃日志吐统计，零 DOM。
+   只做「从 LogEvent 里能直接算出来的事」，不猜：哪些词反复错、哪个时段正确率高、
+   最近 14 天什么走势。判定口径与 §2.6 / §3 一致：
+     - pick / skip 算一次作答，skip 与选错等价（ok:0）；
+     - master 是手动标掌握，计入动作数，但不计正确率（没经过四选一）；
+     - undo 只记账，不参与任何统计。 */
+(function (root) {
+  "use strict";
+  var WC = (root.WC = root.WC || {});
+  var core = (WC.core = WC.core || {});
+
+  var WEEK = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  var HARD_CAP = 8;    // 「真不会」最多列 8 个词
+  var SLOW_CAP = 5;    // 「反应最慢」最多列 5 个词
+  var BEST_MIN = 5;    // 时段样本少于 5 题不评「最稳时段」
+  var DAYS = 14;       // 最近 14 天
+
+  function rateOf(ok, n) {
+    return n > 0 ? Math.round((ok / n) * 100) : 0;
+  }
+
+  function toneOf(rate, n) {
+    if (!n) return "none";
+    if (rate >= 80) return "strong";
+    if (rate >= 50) return "mid";
+    return "weak";
+  }
+
+  function avgText(ms) {
+    return ms > 0 ? (ms / 1000).toFixed(1) + " 秒" : "—";
+  }
+
+  /* "YYYY-MM-DD" 加减天数。用本地 Date 构造器做日历运算，不取「现在」。 */
+  function dayShift(day, delta) {
+    var p = day.split("-");
+    var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+    d.setDate(d.getDate() + delta);
+    return core.derive.dayOf(Math.floor(d.getTime() / 1000));
+  }
+
+  function emptySeries(n) {
+    var out = [];
+    for (var i = 0; i < n; i++) out.push({ n: 0, ok: 0 });
+    return out;
+  }
+
+  /* 给柱子补展示用字段：pct = 柱高（相对本序列最大题量），tone = 正确率档位。
+     UI 只负责把 pct 变成 height、把 tone 变成 class，不再自己算比例。 */
+  function decorate(series) {
+    var max = 0;
+    var i;
+    for (i = 0; i < series.length; i++) if (series[i].n > max) max = series[i].n;
+    for (i = 0; i < series.length; i++) {
+      var b = series[i];
+      b.rate = rateOf(b.ok, b.n);
+      b.tone = toneOf(b.rate, b.n);
+      b.pct = b.n > 0 && max > 0 ? Math.max(6, Math.round((b.n / max) * 100)) : 0;
+    }
+    return series;
+  }
+
+  function analyze(log, opts) {
+    opts = opts || {};
+    var bookId = typeof opts.bookId === "string" ? opts.bookId : "";
+    var words = opts.words || {};
+    var entries = core.log.entries(log);
+
+    var hours = emptySeries(24);
+    var week = emptySeries(7);
+    var days = {};
+    var byWord = {};
+    var totals = { n: 0, ok: 0, wrong: 0, actions: 0, msSum: 0, msN: 0 };
+    var firstAt = 0;
+    var lastAt = 0;
+
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      if (!e || (e.k !== "pick" && e.k !== "skip" && e.k !== "master")) continue;
+      if (bookId && e.b && e.b !== bookId) continue;
+
+      var t = Number(e.t) || 0;
+      if (t > 0) {
+        if (!firstAt || t < firstAt) firstAt = t;
+        if (t > lastAt) lastAt = t;
+      }
+      var d = t > 0 ? core.derive.dayOf(t) : "";
+      if (d) days[d] = true;
+      totals.actions++;
+
+      if (e.k === "master") continue; // 手动标掌握不算一次四选一
+
+      var ok = e.ok === 1 ? 1 : 0;
+      totals.n++;
+      totals.ok += ok;
+      if (!ok) totals.wrong++;
+
+      var ms = Number(e.ms);
+      if (isFinite(ms) && ms > 0) {
+        totals.msSum += ms;
+        totals.msN++;
+      }
+
+      if (d) {
+        var dt = new Date(t * 1000);
+        var h = dt.getHours();
+        var hb = hours[h];
+        hb.n++;
+        hb.ok += ok;
+        var wd = (dt.getDay() + 6) % 7;
+        week[wd].n++;
+        week[wd].ok += ok;
+      }
+
+      var wid = e.w;
+      if (!wid) continue;
+      var ws = byWord[wid] || (byWord[wid] = { tries: 0, wrong: 0, msSum: 0, msN: 0, lastAt: 0 });
+      ws.tries++;
+      if (!ok) ws.wrong++;
+      if (isFinite(ms) && ms > 0) {
+        ws.msSum += ms;
+        ws.msN++;
+      }
+      if (t > ws.lastAt) ws.lastAt = t;
+    }
+
+    var today = typeof opts.today === "string" && opts.today
+      ? opts.today
+      : (lastAt ? core.derive.dayOf(lastAt) : "");
+
+    var dayList = [];
+    for (var dk in days) if (days[dk]) dayList.push(dk);
+    dayList.sort();
+
+    /* 连续学习天数：从今天（今天没练就从昨天）往前数 */
+    var streak = 0;
+    if (today) {
+      var cursor = days[today] ? today : dayShift(today, -1);
+      while (days[cursor]) {
+        streak++;
+        cursor = dayShift(cursor, -1);
+      }
+    }
+
+    /* 最近 14 天 */
+    var daily = [];
+    for (var k = DAYS - 1; k >= 0; k--) {
+      var day = today ? dayShift(today, -k) : "";
+      daily.push({ date: day, label: day ? day.slice(5) : "", n: 0, ok: 0 });
+    }
+    for (i = 0; i < entries.length; i++) {
+      var ee = entries[i];
+      if (!ee || (ee.k !== "pick" && ee.k !== "skip")) continue;
+      if (bookId && ee.b && ee.b !== bookId) continue;
+      if (!ee.t) continue;
+      var key = core.derive.dayOf(ee.t);
+      for (var j = 0; j < daily.length; j++) {
+        if (daily[j].date === key) {
+          daily[j].n++;
+          if (ee.ok === 1) daily[j].ok++;
+          break;
+        }
+      }
+    }
+
+    var hb2;
+    for (i = 0; i < 24; i++) {
+      hb2 = hours[i];
+      hb2.h = i;
+      hb2.label = i + " 点";
+      hb2.title = hb2.n ? i + " 点 · " + hb2.n + " 题 · " + rateOf(hb2.ok, hb2.n) + "%" : i + " 点 · 无记录";
+    }
+    for (i = 0; i < 7; i++) {
+      week[i].d = i;
+      week[i].label = WEEK[i];
+      week[i].title = WEEK[i] + " · " + week[i].n + " 题" +
+        (week[i].n ? " · " + rateOf(week[i].ok, week[i].n) + "%" : "");
+    }
+    for (i = 0; i < daily.length; i++) {
+      daily[i].title = (daily[i].date || "—") + " · " + daily[i].n + " 题" +
+        (daily[i].n ? " · " + rateOf(daily[i].ok, daily[i].n) + "%" : "");
+    }
+
+    decorate(hours);
+    decorate(week);
+    decorate(daily);
+
+    var bestHour = null;
+    for (i = 0; i < 24; i++) {
+      if (hours[i].n < BEST_MIN) continue;
+      if (!bestHour || hours[i].rate > bestHour.rate ||
+          (hours[i].rate === bestHour.rate && hours[i].n > bestHour.n)) {
+        bestHour = hours[i];
+      }
+    }
+
+    var hard = [];
+    var slow = [];
+    for (var wid2 in byWord) {
+      var s = byWord[wid2];
+      var meta = words[wid2] || {};
+      var entry = {
+        w: wid2,
+        pos: meta.pos || "",
+        cn: meta.cn || "",
+        g: meta.g || 0,
+        tries: s.tries,
+        wrong: s.wrong,
+        rate: rateOf(s.tries - s.wrong, s.tries),
+        avgMs: s.msN ? Math.round(s.msSum / s.msN) : 0
+      };
+      entry.avgText = avgText(entry.avgMs);
+      entry.text = "错 " + s.wrong + " / " + s.tries + " 次";
+      /* 「真不会」至少错两次、且错率不低；只错一次可能是手滑，不放进榜单。
+         「最慢」除了至少 3 次，平均反应要真的慢（>= 3 秒），否则排第一的可能是
+         一个只用了 2.3 秒的词——那不叫慢，叫样本少。 */
+      if (s.wrong >= 2 && entry.rate <= 60) hard.push(entry);
+      if (s.tries >= 3 && entry.avgMs >= 3000) slow.push(entry);
+    }
+    hard.sort(function (a, b) {
+      return b.wrong - a.wrong || a.rate - b.rate || b.tries - a.tries ||
+        (a.w < b.w ? -1 : a.w > b.w ? 1 : 0);
+    });
+    slow.sort(function (a, b) {
+      return b.avgMs - a.avgMs || b.tries - a.tries || (a.w < b.w ? -1 : a.w > b.w ? 1 : 0);
+    });
+    hard = hard.slice(0, HARD_CAP);
+    slow = slow.slice(0, SLOW_CAP);
+
+    var avgMs = totals.msN ? Math.round(totals.msSum / totals.msN) : 0;
+
+    return {
+      totals: {
+        n: totals.n,
+        ok: totals.ok,
+        wrong: totals.wrong,
+        rate: rateOf(totals.ok, totals.n),
+        actions: totals.actions,
+        days: dayList.length,
+        streak: streak,
+        avgMs: avgMs,
+        avgText: avgText(avgMs),
+        firstAt: firstAt,
+        lastAt: lastAt
+      },
+      bestHour: bestHour
+        ? { h: bestHour.h, n: bestHour.n, rate: bestHour.rate, text: bestHour.h + " 点 · " + bestHour.rate + "%" }
+        : null,
+      hours: hours,
+      week: week,
+      daily: daily,
+      hard: hard,
+      slow: slow
+    };
+  }
+
+  core.analysis = { analyze: analyze };
+})(typeof globalThis !== "undefined" ? globalThis : this);
+
 /* ──────── src/core/viewmodel.js ──────── */
 /* viewmodel.js —— toViewModel(state, {viewport}) → VM（contract §6，字段逐字对应）。
    每次调用返回一份全新对象，UI 全量重渲染。 */
@@ -2556,7 +3376,7 @@
 
   /* 词汇列表（收藏 / 待复习 / 已掌握 / 全部）。
      排序固定为书中顺序，不做「最近」排序——列表是用来扫的，不是用来排的。 */
-  var LIST_TITLE = { fav: "收藏", review: "待复习", mastered: "已掌握", all: "全部" };
+  var LIST_TITLE = { fav: "收藏", review: "待复习", learning: "学习中", mastered: "已掌握", all: "全部" };
   var STA_LABEL = {
     untouched: "未学", new: "未学", learning: "学习中", pending: "待复习", mastered: "已掌握"
   };
@@ -2574,6 +3394,7 @@
         key === "all" ? true
         : key === "fav" ? !!state.fav[bw.w]
         : key === "review" ? st === "pending"
+        : key === "learning" ? st === "learning"
         : st === "mastered";
       if (!hit) continue;
       all.push({ w: bw.w, pos: bw.pos, cn: bw.cn, g: bw.g, sta: STA_LABEL[st] });
@@ -2605,6 +3426,12 @@
       });
     }
     return out;
+  }
+
+  /* 分析页（P7，§6.2）：只在 route === "stats" 时计算，别让每次答题重渲染都扫全量日志 */
+  function statsVM(state, book, idx, today) {
+    if (!core.analysis) return null;
+    return core.analysis.analyze(state.log, { bookId: book.id, today: today, words: idx });
   }
 
   function toViewModel(state, opts) {
@@ -2646,6 +3473,7 @@
       counts: {
         today: core.derive.todayCount(entries, today),
         review: sum.total.pending,
+        learning: sum.total.learning,
         fav: favCount,
         mastered: sum.total.mastered,
         total: sum.total.size,
@@ -2653,11 +3481,13 @@
       },
       learn: state.ui.route === "learn" ? learnVM(state, book, sum, idx) : null,
       list: state.ui.route === "list" ? listVM(state, book, wmap) : null,
+      stats: state.ui.route === "stats" ? statsVM(state, book, idx, today) : null,
       groups: groups,
       library: {
         rows: [
           { key: "fav", label: "收藏", n: favCount },
           { key: "review", label: "待复习", n: sum.total.pending },
+          { key: "learning", label: "学习中", n: sum.total.learning },
           { key: "all", label: "全部", n: sum.total.size }
         ]
       },
@@ -2676,9 +3506,9 @@
   var WC = (root.WC = root.WC || {});
   var core = (WC.core = WC.core || {});
 
-  var ROUTES = { learn: 1, library: 1, me: 1 };
+  var ROUTES = { learn: 1, library: 1, me: 1, stats: 1 };
   var THEMES = { g1: 1, g2: 1, g3: 1 };
-  var LIST_KEYS = { fav: 1, review: 1, mastered: 1, all: 1 };
+  var LIST_KEYS = { fav: 1, review: 1, learning: 1, mastered: 1, all: 1 };
   var TOAST_MS = 2000;
   var FLASH_MS = 1000; // 答对但不展示详情：叮一声后停留 1 秒自动进下一词
 
@@ -2832,6 +3662,19 @@
       }
     }
 
+    /* 自动朗读的唯一入口：开一张新卡之后读这张卡的词。
+       以前只在 continue 里读，导致 flash 自动前进 / 标掌握 / 换组 / 换书都漏读。 */
+    function autoSpeakCurrent() {
+      if (!state.p || !state.p.autoSpeak) return;
+      if (!state.session || state.session.phase !== "ask" || !state.session.wordId) return;
+      speak(state.session.wordId);
+    }
+
+    function nextCard() {
+      startCard(state);
+      autoSpeakCurrent();
+    }
+
     /* 150ms 连点闸门（§3.2）：answer / skip / continue 共用。
        距上一次通过的判分动作不足 GATE_MS 则整条丢弃，VM 无任何变化。 */
     function gated() {
@@ -2900,7 +3743,7 @@
         flashTimer = null;
         if (state.session.phase === "flash") {
           state.undo = null;
-          startCard(state);
+          nextCard();
           save();
           emit();
         }
@@ -2950,7 +3793,7 @@
       state.sched = core.schedule.afterJudge(state.sched, s.wordId, true);
       state.undo = null;
       toast("已标为已掌握");
-      startCard(state);
+      nextCard();
     }
 
     function doFav() {
@@ -2993,7 +3836,7 @@
       state.sched = core.schedule.initGroup(book, wmap(), g);
       state.ui.route = "learn";
       state.undo = null;
-      startCard(state);
+      nextCard();
     }
 
     var ACTIONS = {
@@ -3046,8 +3889,7 @@
         if (!isReviewPhase(state.session.phase) || !gated()) return;
         clearFlash();
         state.undo = null;
-        startCard(state);
-        if (state.p.autoSpeak && state.session.phase === "ask") speak(state.session.wordId);
+        nextCard();
       },
       undo: function () {
         doUndo();
@@ -3089,7 +3931,7 @@
         state.ui.listFilter = null;
         state.undo = null;
         clearFlash();
-        startCard(state);
+        nextCard();
         dirty = true;
       },
 
@@ -3114,8 +3956,10 @@
         state.p.theme = a.theme;
         dirty = true;
       },
-      speak: function () {
-        if (state.session.wordId) speak(state.session.wordId);
+      /* text 可选：给了就读 text（例句 / 以后加的同族词），没给就读当前词 */
+      speak: function (a) {
+        var text = a && typeof a.text === "string" && a.text ? a.text : state.session.wordId;
+        if (text) speak(text);
       },
       autoSpeak: function (a) {
         state.p.autoSpeak = !!a.on;
@@ -3124,6 +3968,7 @@
     };
 
     save(); // 启动即 flush：迁移（v6→v7）后立即落成新格式档
+    autoSpeakCurrent(); // 启动就在学习页时，第一张卡也要读
 
     function dispatch(a) {
       if (!a || typeof a.type !== "string") return;
@@ -3454,22 +4299,36 @@
   var usable = !!(synth && Utterance && typeof synth.speak === "function");
 
   function webSpeech() {
+    /* Chrome 里 cancel() 之后立刻 speak() 有概率把新句子也吞掉（尤其连续切词时）。
+       用序号 + 一个 tick 的延迟，既保证「只读最后一句」，又给引擎留出清理窗口。 */
+    var seq = 0;
     return {
       available: true,
       speak: function (text, opts) {
         if (!text) return;
         opts = opts || {};
+        var mine = ++seq;
         try {
           synth.cancel(); // 铁律 1+2：新朗读（含切词）先把旧的掐掉，并发只保一个
-          var u = new Utterance(String(text));
-          u.lang = typeof opts.lang === "string" && opts.lang ? opts.lang : "en-US";
-          if (typeof opts.rate === "number" && opts.rate > 0) u.rate = opts.rate;
-          synth.speak(u);
         } catch (e) {
-          /* 铁律 4：异常不外抛 */
+          /* 铁律 4 */
         }
+        var fire = function () {
+          if (mine !== seq) return; // 期间又来了新句子，这句作废
+          try {
+            if (synth.paused) synth.resume(); // Chrome 偶发自己 pause，先拉回来
+            var u = new Utterance(String(text));
+            u.lang = typeof opts.lang === "string" && opts.lang ? opts.lang : "en-US";
+            if (typeof opts.rate === "number" && opts.rate > 0) u.rate = opts.rate;
+            synth.speak(u);
+          } catch (e) {
+            /* 铁律 4：异常不外抛 */
+          }
+        };
+        setTimeout(fire, 30);
       },
       cancel: function () {
+        seq++;
         try {
           synth.cancel();
         } catch (e) {
