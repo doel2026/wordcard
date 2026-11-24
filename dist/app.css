@@ -1,4 +1,4 @@
-/* app.css —— 由 build/concat.py 拼接，禁止手改。内容哈希：5a6d2fb571 */
+/* app.css —— 由 build/concat.py 拼接，禁止手改。内容哈希：679a5484a1 */
 
 /* ──────── src/ui/shared/tokens.css ──────── */
 /* tokens.css —— 由 build/gen_tokens.py 从 build/tokens.json 生成，禁止手改。
@@ -204,6 +204,22 @@ p{margin:0}
 .wc-btn.is-quiet{background:var(--white-46);color:var(--canvas-body)}
 .wc-btn:disabled{opacity:.5}
 
+/* ── 读音键（单词 / 例句 / 同族词共用） ─────────────── */
+.wc-speak{
+  display:inline-flex;align-items:center;justify-content:center;
+  flex:none;width:32px;height:32px;
+  border-radius:var(--radius-pill);
+  background:var(--white-46);
+  color:var(--canvas-body);
+  vertical-align:middle;
+  transition:background var(--motion-swap) var(--motion-ease),
+             color var(--motion-swap) var(--motion-ease);
+}
+.wc-speak:hover{background:var(--white-78);color:var(--canvas-body)}
+.wc-speak .wc-ic{font-size:var(--fs-body);line-height:1}
+.wc-speak.is-small{width:28px;height:28px}
+.wc-speak:focus-visible{outline:2px solid var(--deep);outline-offset:2px}
+
 /* ── 细进度条 ─────────────────────────────────────────── */
 .wc-bar{height:4px;border-radius:2px;background:var(--track);overflow:hidden}
 .wc-bar > i{display:block;height:4px;border-radius:2px;background:var(--deep);
@@ -303,6 +319,101 @@ body.wc-has-notice .desk-root{padding-top:26px}
 }
 .wc-word-sta{flex:none;font-size:var(--fs-tiny);color:var(--ink3)}
 
+/* ── 分析页（P7）：数字、柱状图、排行 ────────────────── */
+.wc-stat-metrics{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:8px;
+}
+.wc-stat-metric{
+  padding:10px 12px;
+  border-radius:var(--radius-control);
+  background:var(--line-soft);
+}
+.wc-stat-v{
+  font-size:24px;font-weight:500;line-height:1.2;
+  color:var(--ink);letter-spacing:-.3px;
+}
+.wc-stat-k{margin-top:2px;font-size:var(--fs-small);color:var(--ink3);line-height:1.5}
+.wc-stat-sub{font-size:var(--fs-tiny);color:var(--ink3);line-height:1.5}
+
+.wc-stat-chart{
+  display:flex;align-items:flex-end;gap:3px;
+  height:64px;
+}
+.wc-stat-col{flex:1;min-width:0;height:100%}
+.wc-stat-track{
+  position:relative;height:100%;overflow:hidden;
+  border-radius:3px;
+  background:var(--line-soft);
+}
+.wc-stat-fill{
+  position:absolute;left:0;right:0;bottom:0;
+  display:block;
+  border-radius:3px 3px 0 0;
+  transition:height var(--motion-reveal) var(--motion-ease);
+}
+.wc-stat-fill.is-strong{background:var(--deep)}
+.wc-stat-fill.is-mid{background:var(--ink3)}
+.wc-stat-fill.is-weak{background:var(--err)}
+.wc-stat-fill.is-none{background:transparent}
+
+.wc-stat-axis{
+  display:flex;justify-content:space-between;
+  margin-top:6px;
+  font-size:var(--fs-tiny);color:var(--ink3);line-height:1.4;
+}
+.wc-stat-cap{font-size:var(--fs-small);color:var(--ink3);line-height:1.6}
+.wc-stat-legend{
+  display:flex;align-items:center;gap:6px;
+  font-size:var(--fs-tiny);color:var(--ink3);line-height:1.4;
+}
+.wc-stat-dot{
+  display:inline-block;width:7px;height:7px;border-radius:2px;
+  background:var(--ink3);flex:none;
+}
+.wc-stat-dot.is-strong{background:var(--deep)}
+.wc-stat-dot.is-weak{background:var(--err)}
+
+.wc-stat-badge{
+  flex:none;
+  padding:2px 9px;
+  border-radius:var(--radius-pill);
+  background:var(--line-soft);
+  font-size:var(--fs-tiny);color:var(--ink2);
+  line-height:1.6;
+}
+
+.wc-stat-head{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  margin-bottom:10px;
+}
+.wc-stat-h{font-size:var(--fs-body);font-weight:500;color:var(--ink);line-height:1.5}
+.wc-stat-block + .wc-stat-block{margin-top:14px}
+
+.wc-stat-rows{display:flex;flex-direction:column}
+.wc-stat-row{
+  display:flex;align-items:baseline;gap:10px;
+  padding:9px 0;
+  border-bottom:1px solid var(--line-soft);
+  min-width:0;
+}
+.wc-stat-row:last-child{border-bottom:0}
+.wc-stat-row-w{
+  flex:none;min-width:84px;
+  font-size:var(--fs-body);font-weight:500;color:var(--ink);
+  overflow-wrap:anywhere;line-height:1.5;
+}
+.wc-stat-row-w em{
+  margin-left:4px;
+  font-style:normal;font-weight:400;
+  font-size:var(--fs-tiny);color:var(--ink3);
+}
+.wc-stat-row-cn{
+  flex:1;min-width:0;
+  font-size:var(--fs-small);color:var(--ink2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.wc-stat-row-n{flex:none;font-size:var(--fs-small);color:var(--ink3)}
+
 /* ──────── src/ui/mobile/mobile.css ──────── */
 /* mobile.css —— M2 手机三页 + 底部页签。只许用 tokens.css 里的变量，无颜色字面量。 */
 
@@ -399,6 +510,16 @@ button, [role="button"]{-webkit-tap-highlight-color:transparent}
   color:var(--canvas-sub);
   line-height:1.4;
 }
+.mob-word-row{
+  display:flex;align-items:center;gap:10px;
+  min-width:0;
+}
+.mob-word-row h1{margin:0;min-width:0}
+.mob-word-row .wc-speak{margin-top:2px}
+.mob-root .wc-speak{width:38px;height:38px}
+.mob-root .wc-speak .wc-ic{font-size:17px}
+.mob-root .wc-speak.is-small{width:32px;height:32px}
+.mob-root .wc-speak.is-small .wc-ic{font-size:15px}
 .mob-learn.is-reveal .mob-word{padding-top:10px}
 .mob-learn.is-reveal .mob-word h1{font-size:var(--fs-word-mobile-reveal)}
 
@@ -699,6 +820,8 @@ button, [role="button"]{-webkit-tap-highlight-color:transparent}
   font-size:var(--fs-body);
   line-height:1.7;
 }
+.mob-ex-row{display:flex;align-items:flex-start;gap:10px}
+.mob-ex-row .mob-ex-en{flex:1;min-width:0}
 .mob-detail-ex .mob-ex-en{color:var(--canvas-body)}
 .mob-detail-ex .mob-ex-tr{margin-top:4px;color:var(--canvas-sub)}
 .mob-detail-note{
@@ -715,6 +838,39 @@ button, [role="button"]{-webkit-tap-highlight-color:transparent}
   text-align:left;
 }
 .mob-bookrow-swap{font-size:var(--fs-small);color:var(--ink3);flex:none}
+
+/* ── 分析页（P7） ────────────────────────────────────── */
+.mob-stats{padding-bottom:calc(64px + env(safe-area-inset-bottom))}
+.mob-stats-top{padding:22px 18px 0}
+.mob-stats-sub{
+  margin-top:4px;
+  font-size:var(--fs-small);
+  color:var(--ink3);
+  line-height:1.6;
+}
+.mob-stat-card{margin:12px 16px 0;padding:14px 15px}
+.mob-stat-card .wc-stat-metrics{gap:8px}
+.mob-stat-empty-t{
+  font-size:var(--fs-body);
+  font-weight:500;
+  color:var(--ink);
+  text-align:center;
+}
+.mob-stat-empty-s{
+  margin:8px 0 0;
+  font-size:var(--fs-small);
+  color:var(--ink3);
+  line-height:1.7;
+  text-align:center;
+}
+.mob-stat-empty-cta{margin-top:16px}
+.mob-stat-foot{
+  margin:18px 20px 8px;
+  font-size:var(--fs-small);
+  color:var(--ink3);
+  line-height:1.6;
+  text-align:center;
+}
 
 /* ──────── src/ui/desktop/desktop.css ──────── */
 /* desktop.css —— M4 桌面布局（严格照样板：206 侧栏 + 满高主区 + 渐变大卡）。
@@ -913,6 +1069,12 @@ button, [role="button"]{-webkit-tap-highlight-color:transparent}
   color:var(--ink);
   overflow-wrap:anywhere;
 }
+.desk-word-row{
+  display:flex;align-items:center;gap:12px;
+  min-width:0;
+}
+.desk-word-row .desk-word{min-width:0}
+.desk-word-row .wc-speak{margin-top:4px}
 .desk-ph{
   margin-top:7px;
   font-size:var(--fs-phonetic);
@@ -936,6 +1098,8 @@ button, [role="button"]{-webkit-tap-highlight-color:transparent}
   line-height:1.6;
   color:var(--canvas-body);
 }
+.desk-ex-row{display:flex;align-items:flex-start;gap:8px}
+.desk-ex-row .desk-ex-en{flex:1;min-width:0}
 .desk-ex-en{overflow-wrap:anywhere}
 .desk-ex-tr{
   margin-top:2px;
@@ -1191,3 +1355,41 @@ button, [role="button"]{-webkit-tap-highlight-color:transparent}
   margin-bottom:7px;
 }
 .desk-list-card .wc-empty{margin:0}
+
+/* ── 分析页（P7） ─────────────────────────────────────── */
+.desk-stats{
+  flex:1;min-height:0;overflow-y:auto;
+  display:flex;flex-direction:column;gap:14px;
+  color:var(--ink);
+}
+.desk-stats-top{
+  flex:none;
+  display:flex;align-items:baseline;justify-content:space-between;gap:16px;
+}
+.desk-stats-sub{font-size:var(--fs-small);color:var(--ink3);line-height:1.6}
+.desk-stat-card{padding:16px 18px;min-width:0}
+.desk-stat-card .wc-stat-metrics{grid-template-columns:repeat(4,1fr)}
+.desk-stat-card .wc-stat-metric{background:var(--white-46)}
+.desk-stats-grid{
+  display:grid;grid-template-columns:1.25fr 1fr;
+  gap:14px;align-items:start;
+}
+.desk-stats-col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.desk-stats .wc-stat-chart{height:76px}
+.desk-stats .wc-stat-row-w{min-width:118px}
+.desk-stats-foot{font-size:var(--fs-small);color:var(--ink3);line-height:1.6;padding-bottom:4px}
+.desk-stat-empty-t{
+  font-size:var(--fs-body);font-weight:500;color:var(--ink);
+  text-align:center;margin-top:8px;
+}
+.desk-stat-empty-s{
+  margin-top:8px;
+  font-size:var(--fs-small);color:var(--ink3);
+  line-height:1.7;text-align:center;
+}
+.desk-stat-empty-cta{max-width:180px;margin:16px auto 4px}
+
+@media (max-width:1080px){
+  .desk-stats-grid{grid-template-columns:1fr}
+  .desk-stat-card .wc-stat-metrics{grid-template-columns:repeat(2,1fr)}
+}
