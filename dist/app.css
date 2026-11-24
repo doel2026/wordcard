@@ -1,4 +1,4 @@
-/* app.css —— 由 build/concat.py 拼接，禁止手改。内容哈希：679a5484a1 */
+/* app.css —— 由 build/concat.py 拼接，禁止手改。内容哈希：9f3950f265 */
 
 /* ──────── src/ui/shared/tokens.css ──────── */
 /* tokens.css —— 由 build/gen_tokens.py 从 build/tokens.json 生成，禁止手改。
@@ -322,6 +322,9 @@ body.wc-has-notice .desk-root{padding-top:26px}
 /* ── 分析页（P7）：数字、柱状图、排行 ────────────────── */
 .wc-stat-metrics{
   display:grid;grid-template-columns:repeat(2,1fr);gap:8px;
+}
+.wc-stat-metrics.is-3{
+  grid-template-columns:repeat(3,1fr);
 }
 .wc-stat-metric{
   padding:10px 12px;
@@ -1369,6 +1372,7 @@ button, [role="button"]{-webkit-tap-highlight-color:transparent}
 .desk-stats-sub{font-size:var(--fs-small);color:var(--ink3);line-height:1.6}
 .desk-stat-card{padding:16px 18px;min-width:0}
 .desk-stat-card .wc-stat-metrics{grid-template-columns:repeat(4,1fr)}
+.desk-stat-card .wc-stat-metrics.is-3{grid-template-columns:repeat(3,1fr)}
 .desk-stat-card .wc-stat-metric{background:var(--white-46)}
 .desk-stats-grid{
   display:grid;grid-template-columns:1.25fr 1fr;
@@ -1392,4 +1396,5 @@ button, [role="button"]{-webkit-tap-highlight-color:transparent}
 @media (max-width:1080px){
   .desk-stats-grid{grid-template-columns:1fr}
   .desk-stat-card .wc-stat-metrics{grid-template-columns:repeat(2,1fr)}
+  .desk-stat-card .wc-stat-metrics.is-3{grid-template-columns:repeat(3,1fr)}
 }
