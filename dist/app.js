@@ -1,5 +1,5 @@
 /* app.js —— 由 build/concat.py 拼接，禁止手改。
-   内容哈希：8e23ba7468  prod  22 个文件
+   内容哈希：b12b7c91f6  prod  22 个文件
    顺序见 build/manifest.json */
 
 /* ──────── src/ui/shared/dom.js ──────── */
@@ -1009,7 +1009,23 @@
             },
             h("span", { text: "导入" }),
             h("span", { class: "mob-row-hint", text: "按词取新，不覆盖" })
-          )
+          ),
+          WC.app && WC.app.backupEnabled && WC.app.backupEnabled()
+            ? h(
+                "button",
+                {
+                  class: "wc-row",
+                  type: "button",
+                  on: {
+                    click: function () {
+                      if (WC.app && WC.app.openBackupFolder) WC.app.openBackupFolder();
+                    }
+                  }
+                },
+                h("span", { text: "备份" }),
+                h("span", { class: "mob-row-hint", text: "打开文件夹" })
+              )
+            : null
         )
       )
     );
@@ -1724,10 +1740,16 @@
 
       // 导出 / 导入：文件对话框由 app.js 管（UI 不碰 storage，也不拼 JSON）
       var data = h("div", { class: "desk-plain-card desk-kv" });
-      [
+      var dataRows = [
         ["导出", "下载 JSON", function () { if (WC.app) WC.app.exportFile(); }],
         ["导入", "按词取新，不覆盖", function () { if (WC.app) WC.app.pickImport(); }]
-      ].forEach(function (row) {
+      ];
+      /* 自动备份只在 macOS 壳里有（window.WCBackup）。浏览器里不显示这一行，
+         否则点了没反应，比没有更糟。 */
+      if (WC.app && WC.app.backupEnabled && WC.app.backupEnabled()) {
+        dataRows.push(["备份", "打开文件夹", function () { if (WC.app) WC.app.openBackupFolder(); }]);
+      }
+      dataRows.forEach(function (row) {
         data.appendChild(
           h(
             "button",
@@ -4182,6 +4204,52 @@ WC.books["cet4-key600"] = {"id":"cet4-key600","name":"四级重点词汇600","gr
 
   function dispatch(a) {
     if (engine) engine.dispatch(a);
+    scheduleBackup();
+  }
+
+  /* ── 自动备份（只有 macOS 壳里有 window.WCBackup） ────────────
+     浏览器 / 线上版没有这个对象，整段自动空转，线上行为一个字不变。
+
+     时机：启动 3 秒后一次（把上一次会话的进度存下来），之后每有动作排一次队，
+           两次落盘之间最少隔 45 秒。内容没变时壳那边直接跳过，
+           所以这里不用自己做去重，也不怕挂机一天攒出几百个相同文件。 */
+  var BK_FIRST = 3000;
+  var BK_GAP = 45000;
+  var BK_DELAY = 6000;
+  var bkTimer = null;
+  var bkLastAt = 0;
+  var bkLast = null;   // 最近一次落盘结果，给界面显示用
+
+  function backupEnabled() {
+    return !!(window.WCBackup && window.WCBackup.auto);
+  }
+
+  function flushBackup() {
+    bkTimer = null;
+    if (!backupEnabled() || !engine || !engine.exportText) return;
+    var text = engine.exportText();
+    if (!text) return;
+    try {
+      var p = window.WCBackup.auto(text);
+      if (p && p.then) {
+        p.then(function (r) {
+          bkLast = r || null;
+          /* 只有真落了盘才记时间。被拒（空档 / 非法）或写失败都不算数，
+             否则下一次要白等满 45 秒才有机会重试。 */
+          if (r && r.ok) bkLastAt = Date.now();
+        }).catch(function () {});
+      }
+    } catch (e) {
+      /* 备份是保险，不是主流程：写不进去也不能让答题停住 */
+    }
+  }
+
+  function scheduleBackup() {
+    if (!backupEnabled()) return;
+    if (bkTimer) clearTimeout(bkTimer);
+    var gap = Date.now() - bkLastAt;
+    var wait = gap >= BK_GAP ? BK_DELAY : BK_GAP - gap;
+    bkTimer = setTimeout(flushBackup, wait);
   }
 
   function render(vm) {
@@ -4234,6 +4302,10 @@ WC.books["cet4-key600"] = {"id":"cet4-key600","name":"四级重点词汇600","gr
     engine.subscribe(render);
     render(engine.getVM());
 
+    /* 首次自动备份：等首帧、迁移后的 flush、自动朗读都落地再写，
+       这时候 exportText() 拿到的是真正稳定的档。 */
+    if (backupEnabled()) setTimeout(flushBackup, BK_FIRST);
+
     var timer = null;
     window.addEventListener("resize", function () {
       if (timer) clearTimeout(timer);
@@ -4285,6 +4357,23 @@ WC.books["cet4-key600"] = {"id":"cet4-key600","name":"四级重点词汇600","gr
     pickImport: pickImport,
     exportText: function () {
       return engine && engine.exportText ? engine.exportText() : null;
+    },
+    /* 自动备份：浏览器里 backupEnabled() 为 false，UI 据此决定显不显示入口 */
+    backupEnabled: backupEnabled,
+    backupNow: flushBackup,
+    backupInfo: function () {
+      if (!backupEnabled()) return Promise.resolve(null);
+      return Promise.resolve(window.WCBackup.info()).catch(function () { return null; });
+    },
+    openBackupFolder: function () {
+      if (!backupEnabled()) return;
+      flushBackup(); // 先把当前状态落一份，再开目录：点开看到的就是最新
+      try {
+        var p = window.WCBackup.openFolder();
+        if (p && p.catch) p.catch(function () {});
+      } catch (e) {
+        /* 同上，静默 */
+      }
     },
     getVM: function () { return engine ? engine.getVM() : null; },
     get viewport() { return current; },
