@@ -1,5 +1,5 @@
 /* app.js —— 由 build/concat.py 拼接，禁止手改。
-   内容哈希：3995cfb98e  prod  22 个文件
+   内容哈希：8a00fe6a4a  prod  22 个文件
    顺序见 build/manifest.json */
 
 /* ──────── src/ui/shared/dom.js ──────── */
@@ -65,7 +65,7 @@
 /* ──────── src/ui/shared/components.js ──────── */
 /* components.js —— 共享组件。只吃 VM 的字段，不读 state，不写业务判断。
    四个组件：
-     WC.ui.option({pos, cn, num, mark})       选项卡（mark: idle|right|wrong|muted）
+     WC.ui.option({pos, cn, num, mark, w})   选项卡（mark: idle|right|wrong|muted；w 仅揭示后给）
      WC.ui.button({label, kind, onClick})     按钮（kind: primary|quiet）
      WC.ui.cells({cells, onPick})             组色块网格（7 列）
      WC.ui.rows({rows, onPick})               白卡行列表
@@ -85,7 +85,7 @@
     return h("span", { class: "wc-ic", "aria-hidden": "true", text: GLYPH[name] || "" });
   }
 
-  /* 选项卡 */
+  /* 选项卡。o.w 只在揭示后给（非答案项的单词），ask 阶段没有这个字段。 */
   function option(o) {
     var mark = o.mark || "idle";
     var cls = "wc-opt";
@@ -93,6 +93,7 @@
     else if (mark === "wrong") cls += " is-wrong";
     else if (mark === "muted") cls += " is-muted";
     if (mark !== "idle") cls += " is-locked";
+    if (o.w) cls += " has-w";
 
     return h(
       "div",
@@ -100,13 +101,18 @@
         class: cls,
         role: "button",
         tabindex: mark === "idle" ? "0" : "-1",
-        "aria-label": (o.pos ? o.pos + " " : "") + o.cn
+        "aria-label": (o.pos ? o.pos + " " : "") + o.cn + (o.w ? "（" + o.w + "）" : "")
       },
       h(
         "div",
         { class: "wc-opt-body" },
         o.pos ? h("div", { class: "wc-pos", text: o.pos }) : null,
-        h("div", { class: "wc-cn", text: o.cn })
+        h(
+          "div",
+          { class: "wc-cn" },
+          h("span", { text: o.cn }),
+          o.w ? h("span", { class: "wc-opt-w", text: o.w }) : null
+        )
       ),
       h("i", { class: "wc-num", text: String(o.num || "") })
     );
@@ -290,32 +296,49 @@
   /* 「叮」：用 WebAudio 现合成，不带音频文件。
      必须在用户手势之后创建/恢复 AudioContext，所以调用点是答题那一刻。 */
   var dingCtx = null;
-  var audioUnlocked = false;
 
-  function ensureAudio() {
+  /* fresh = true 时丢掉旧上下文重建一个。
+     长时间挂机 / 切后台 / 系统音频被打断（来电、拔耳机、蓝牙断开）之后，
+     老上下文会停在 suspended（Safari 还有 interrupted），有的设备上它再也 resume 不回来。
+     这种情况只能新建一个。 */
+  function ensureAudio(fresh) {
     try {
       var Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return null;
+      if (dingCtx && (fresh || dingCtx.state === "closed")) {
+        try {
+          dingCtx.close();
+        } catch (e) {
+          /* 已经死了的上下文关不掉也无所谓 */
+        }
+        dingCtx = null;
+      }
       if (!dingCtx) dingCtx = new Ctx();
       return dingCtx;
+    } catch (e) {
+      dingCtx = null;
+      return null;
+    }
+  }
+
+  function resumeAudio(ctx) {
+    if (!ctx || ctx.state === "running") return null;
+    try {
+      var p = ctx.resume();
+      return p && p.then ? p : null;
     } catch (e) {
       return null;
     }
   }
 
-  /* 浏览器要求音频上下文在用户手势里创建/恢复；先点/按一下就把通道打开，
-     之后答题的提示音才不会「时响时不响」。 */
+  /* 浏览器要求音频上下文在用户手势里创建/恢复。
+     注意这里**不设一次性开关**：挂机一晚上再回来，第一次点必须还能把通道重新叫醒；
+     只叫一次的话，那一次失败之后就彻底哑了。 */
   function unlockAudio() {
-    if (audioUnlocked) return;
-    audioUnlocked = true;
-    var ctx = ensureAudio();
+    var ctx = ensureAudio(false);
     if (!ctx || ctx.state === "running") return;
-    try {
-      var p = ctx.resume();
-      if (p && p.catch) p.catch(function () {});
-    } catch (e) {
-      /* 没有音频设备就静默 */
-    }
+    var p = resumeAudio(ctx);
+    if (p) p.catch(function () {});
   }
 
   function beep(ctx, freq, at, dur, peak, type) {
@@ -332,41 +355,69 @@
     o.stop(at + dur + 0.02);
   }
 
+  function playBeeps(ctx, kind) {
+    try {
+      var t0 = ctx.currentTime + 0.01;
+      if (kind === "wrong") {
+        beep(ctx, 196, t0, 0.16, 0.12, "triangle");
+        beep(ctx, 146.8, t0 + 0.1, 0.2, 0.1, "triangle");
+      } else {
+        beep(ctx, 1046.5, t0, 0.22, 0.16, "sine");
+        beep(ctx, 1568, t0 + 0.03, 0.22, 0.06, "sine");
+      }
+    } catch (e) {
+      /* 没有音频设备就当没这回事，不打断背单词 */
+    }
+  }
+
+  /* 在某个上下文上响一次；叫不醒且允许重建时，换一个新上下文再响。
+     重建只做一次，避免死循环。 */
+  function playOn(ctx, kind, mayRebuild) {
+    if (!ctx) return;
+    if (ctx.state === "running") {
+      playBeeps(ctx, kind);
+      return;
+    }
+    var retry = function () {
+      if (ctx.state === "running") {
+        playBeeps(ctx, kind);
+        return;
+      }
+      if (mayRebuild) playOn(ensureAudio(true), kind, false);
+    };
+    var p = resumeAudio(ctx);
+    if (p) p.then(retry).catch(retry);
+    else retry();
+  }
+
   /* 提示音：答对用原来的高音「叮」，答错用两声低音；kind 省略时按答对处理。
      用 WebAudio 现合成，不带音频文件。 */
   function ding(kind) {
-    var ctx = ensureAudio();
-    if (!ctx) return;
-    var play = function () {
-      try {
-        var t0 = ctx.currentTime + 0.01;
-        if (kind === "wrong") {
-          beep(ctx, 196, t0, 0.16, 0.12, "triangle");
-          beep(ctx, 146.8, t0 + 0.1, 0.2, 0.1, "triangle");
-        } else {
-          beep(ctx, 1046.5, t0, 0.22, 0.16, "sine");
-          beep(ctx, 1568, t0 + 0.03, 0.22, 0.06, "sine");
-        }
-      } catch (e) {
-        /* 没有音频设备就当没这回事，不打断背单词 */
-      }
-    };
-    try {
-      if (ctx.state === "running") {
-        play();
-        return;
-      }
-      var p = ctx.resume();
-      if (p && p.then) p.then(play).catch(function () {});
-      else play();
-    } catch (e) {
-      /* 静默降级 */
-    }
+    playOn(ensureAudio(false), kind, true);
   }
 
   if (typeof document !== "undefined" && document.addEventListener) {
     document.addEventListener("pointerdown", unlockAudio, true);
     document.addEventListener("keydown", unlockAudio, true);
+    /* 从后台 / 息屏回来时先试着叫醒（没有手势时可能叫不醒，叫不醒就交给下一次点按） */
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState !== "visible" || !dingCtx) return;
+      if (dingCtx.state === "running") return;
+      var p = resumeAudio(dingCtx);
+      if (p) p.catch(function () {});
+    });
+    if (typeof window !== "undefined" && window.addEventListener) {
+      window.addEventListener("focus", function () {
+        if (!dingCtx || dingCtx.state === "running") return;
+        var p = resumeAudio(dingCtx);
+        if (p) p.catch(function () {});
+      });
+      window.addEventListener("pageshow", function () {
+        if (!dingCtx || dingCtx.state === "running") return;
+        var p = resumeAudio(dingCtx);
+        if (p) p.catch(function () {});
+      });
+    }
   }
 
   WC.ui = {
@@ -643,7 +694,7 @@
 
     var opts = h("div", { class: "mob-opts" });
     learn.options.forEach(function (o, i) {
-      var node = WC.ui.option({ pos: o.pos, cn: o.cn, num: i + 1, mark: o.mark });
+      var node = WC.ui.option({ pos: o.pos, cn: o.cn, w: o.w, num: i + 1, mark: o.mark });
       if (o.mark === "idle") {
         node.addEventListener("click", function () {
           dispatch({ type: "answer", i: i });
@@ -1412,7 +1463,7 @@
 
     var grid = h("div", { class: "desk-opts" });
     learn.options.forEach(function (o, i) {
-      var node = WC.ui.option({ pos: o.pos, cn: o.cn, num: i + 1, mark: o.mark });
+      var node = WC.ui.option({ pos: o.pos, cn: o.cn, w: o.w, num: i + 1, mark: o.mark });
       if (o.mark === "idle") {
         node.addEventListener("click", function () {
           send(dispatch, { type: "answer", i: i });
@@ -2353,7 +2404,7 @@
     return { w: String(seed), n: 0 };
   }
 
-  /* build(word, candidates, seed) → { options: [4 × {pos, cn}], answer: 正确项下标 }
+  /* build(word, candidates, seed) → { options: [4 × {pos, cn, w}], answer: 正确项下标 }
      挑选顺序（§5.2）：同 pos 且字数差 ≤2 → ≤3 → ≤4 → 同 pos 不限字数 → 跨 pos；
      同词根在所有档位一律排除；四个选项 cn 两两不同（§5.5）。 */
   function build(word, candidates, seed) {
@@ -2401,9 +2452,11 @@
     /* 兜底：极端小词本最后才放宽同词根限制，cn 互不相同始终保证（见交付歧义清单） */
     if (picked.length < 3) take(pool);
 
-    var options = picked.map(function (c) { return { pos: c.pos, cn: c.cn }; });
+    /* 每个选项都带上自己那个词的拼写（w）：答完揭示时 UI 要把干扰项对应的单词也亮出来，
+       只靠一份 cn 是猜不回词的（同义/近义的 cn 可能撞车）。见 contract v1.12。 */
+    var options = picked.map(function (c) { return { pos: c.pos, cn: c.cn, w: c.w }; });
     var answer = (hash(s.w) + s.n) % (options.length + 1);
-    options.splice(answer, 0, { pos: word.pos, cn: word.cn });
+    options.splice(answer, 0, { pos: word.pos, cn: word.cn, w: word.w });
     return { options: options, answer: answer };
   }
 
@@ -2872,7 +2925,11 @@
         else if (s.picked !== null && i === s.picked) mark = "wrong";
         else mark = "muted";
       }
-      return { pos: op.pos, cn: op.cn, mark: mark };
+      var o = { pos: op.pos, cn: op.cn, mark: mark };
+      /* v1.12：揭示后把「别的选项分别是哪个词」也带出去（答案那个词已经在词头，
+         不重复）。ask 阶段不给，免得提前泄题；字段也不出现在 ask 的 VM 里。 */
+      if (reveal && i !== s.answer) o.w = op.w || "";
+      return o;
     });
 
     return {
