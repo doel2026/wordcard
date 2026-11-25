@@ -1,5 +1,5 @@
 /* app.js —— 由 build/concat.py 拼接，禁止手改。
-   内容哈希：4d5af10be8  prod  22 个文件
+   内容哈希：7f372f11c9  prod  22 个文件
    顺序见 build/manifest.json */
 
 /* ──────── src/ui/shared/dom.js ──────── */
@@ -649,6 +649,9 @@
     var learn = vm.learn;
     var empty = !vm.book || vm.book.total === 0;
     var group = vm.counts && vm.counts.group ? vm.counts.group : { mastered: 0, size: 0 };
+    /* v1.16：真的走到 done 时全书已经背完了（advanceGroups 会自动跳组），
+       所以这时说「全书完成」，别再说「本组完成」。 */
+    var allDone = !empty && vm.counts && vm.counts.mastered >= vm.counts.total;
 
     var page = h("main", { class: "mob-page mob-learn mob-done" });
     page.appendChild(
@@ -656,12 +659,16 @@
     );
 
     var box = h("div", { class: "mob-done-box" });
-    box.appendChild(h("div", { class: "mob-done-title", text: empty ? "还没有词本" : "本组完成" }));
+    box.appendChild(
+      h("div", { class: "mob-done-title", text: empty ? "还没有词本" : allDone ? "全书完成" : "本组完成" })
+    );
     box.appendChild(
       h("div", {
         class: "mob-done-sub",
         text: empty
           ? "词本接入后就能开始背了"
+          : allDone
+          ? vm.counts.mastered + " / " + vm.counts.total + " 已掌握"
           : group.mastered + " / " + group.size + " 已掌握"
       })
     );
@@ -2021,17 +2028,21 @@
     var learn = vm.learn;
     var empty = !vm.book || vm.book.total === 0;
     var group = (vm.counts && vm.counts.group) || { mastered: 0, size: 0 };
+    /* v1.16：走到 done 时全书已经背完（advanceGroups 自动跳组），文案跟着改 */
+    var allDone = !empty && vm.counts && vm.counts.mastered >= vm.counts.total;
 
     var card = h("section", { class: "desk-card t-" + themeOf(vm) + " desk-done" });
     var box = h("div", { class: "desk-done-box" });
     box.appendChild(
-      h("div", { class: "desk-done-title", text: empty ? "还没有词本" : "本组完成" })
+      h("div", { class: "desk-done-title", text: empty ? "还没有词本" : allDone ? "全书完成" : "本组完成" })
     );
     box.appendChild(
       h("div", {
         class: "desk-done-sub",
         text: empty
           ? "把 cet4 词本放进 src/data/books 再重新构建"
+          : allDone
+          ? vm.counts.mastered + " / " + vm.counts.total + " 已掌握"
           : group.mastered + " / " + group.size + " 已掌握"
       })
     );
@@ -2631,16 +2642,29 @@
     return d.getFullYear() + "-" + (m < 10 ? "0" : "") + m;
   }
 
+  /* 日志上限（v1.16）。进度只有一个 5MB 级的浏览器本地存储，日志无上限 =
+     总有一天天花板到了，之后每次 save 都写不进去（用户零感知丢进度）。
+     9000 条约 1.4M 字符（≈2.9MB），100 题/天 能存三个月；超出就从最旧的丢。
+     事件本身不裁剪字段 —— LogEvent 的形状（§2.6）保持完整，导出/导入才不会有
+     「有的条目缺 opts」这种半截数据。 */
+  var MAX = 9000;
+
+  function cap(arr) {
+    if (arr.length > MAX) arr.splice(0, arr.length - MAX);
+  }
+
   /* 追加：保持原形态——数组直接加；归档对象加到当月桶。返回使用的 log 容器。 */
   function append(log, e) {
     if (!log || Array.isArray(log)) {
       var arr = log || [];
       arr.push(e);
+      cap(arr);
       return arr;
     }
     var m = monthOf(e.t);
     if (!Array.isArray(log[m])) log[m] = [];
     log[m].push(e);
+    cap(log[m]);
     return log;
   }
 
@@ -3068,6 +3092,16 @@
       return o;
     });
 
+    /* 契约 §6.1（v1.16）：done 的 CTA 判据改成「词本里有没有词」。
+       老实现读 book.total，而词本对象只有 id/name/groups/words —— total 恒 undefined，
+       于是「下一组」按钮从来不渲染。全书都背完时「下一组」已无处可去，改给「回词库」。 */
+    var words = book.words || [];
+    var doneCta = null;
+    if (s.phase === "done" && words.length > 0) {
+      var wmap = (state.books[book.id] && state.books[book.id].w) || {};
+      doneCta = { label: core.schedule.nextGroup(book, wmap, g) ? "下一组" : "回词库" };
+    }
+
     return {
       phase: s.phase,
       g: g,
@@ -3079,13 +3113,9 @@
       answer: reveal ? s.answer : null,
       picked: reveal ? s.picked : null,
       skipped: reveal && !!s.skipped,
-      // 契约 §6.1：done 给「下一组」；空书（book.total===0）不给 CTA
-      cta:
-        s.phase === "done"
-          ? (book.total > 0 ? { label: "下一组" } : null)
-          : s.phase === "detail"
-          ? { label: "继续" }
-          : null,        // flash / hold 不给按钮：1 秒后 core 自己接管（下一词 / 详情）
+      // 契约 §6.1：done 给 CTA（还有下一组 / 回词库）；空书（没有词）不给
+      cta: doneCta || (s.phase === "detail" ? { label: "继续" } : null),
+      // flash / hold 不给按钮：1 秒后 core 自己接管（下一词 / 详情）
       hints: { answer: HINTS.answer, pick: HINTS.pick, undo: HINTS.undo }
     };
   }
@@ -3344,18 +3374,34 @@
       return state.books[book.id].w;
     }
 
+    /* 按当前 wmap 重排当前组；本组已全掌握就顺推到下一未完成组（v1.16，导入后用） */
+    function rebuildSched() {
+      var g = state.sched && state.sched.g ? state.sched.g : 1;
+      state.sched = core.schedule.initGroup(book, wmap(), g);
+      advanceGroups(state);
+    }
+
     function emit() {
       var snap = core.toViewModel(state, {});
       for (var i = 0; i < subs.length; i++) subs[i](snap);
     }
 
+    /* v1.16：写盘失败不许再静默。以前 dirty 先被清掉、异常被吞，
+       配额满了以后新进度一条都不落盘，用户零感知；现在至少说一次实话。 */
+    var saveBroken = false;
     function save() {
       if (!storage || !dirty) return;
       dirty = false;
+      var ok = true;
       try {
-        storage.write(storageKey, core.migrate.serialize(state));
+        ok = storage.write(storageKey, core.migrate.serialize(state));
       } catch (e) {
-        /* 存储不可用静默降级，不阻断判分 */
+        ok = false;
+      }
+      /* 老实现的 write 返回 undefined，按「成功」处理，不误报 */
+      if (ok === false && !saveBroken) {
+        saveBroken = true;
+        toast("进度没存上：本地存储写不进去了，请先「导出」一份", "err");
       }
     }
 
@@ -3590,12 +3636,27 @@
           toast("导入失败：文件读不懂", "err");
           return;
         }
+        /* v1.16：merge 换了 books，内存里的 queue/pool 还按旧 wmap 排着 ——
+           不重排的话，导入进来的「已掌握」在当前组不生效，会被重考一整组
+           （cet4 每组约 80 词）。撤销快照也一并作废，否则能撤回到导入前。 */
+        state.undo = null;
+        rebuildSched();
+        if (
+          state.session.phase === "ask" && state.session.wordId &&
+          core.derive.mastered(wmap()[state.session.wordId])
+        ) {
+          nextCard();
+        }
         var added = (report && report.added) || 0;
         var updated = (report && report.updated) || 0;
         var favAdded = (report && report.favAdded) || 0;
         var rejected = (report && report.rejected) || 0;
-        if (rejected > 0 && !added && !updated) toast("导入被拒绝：文件版本更高", "err");
-        else if (!added && !updated && !favAdded) toast("导入完成：没有新进度");
+        if (rejected > 0 && !added && !updated) {
+          /* v1.16：rejected 有两种来由 —— 整包版本更高，和「逐词 at 更旧」。
+             老实现一律说「文件版本更高」，导入一份旧备份时文案完全指错方向。 */
+          if (report && report.tooNew) toast("导入被拒绝：文件版本更高", "err");
+          else toast("导入完成：文件里的记录都比本机旧，本机一条没动", "info");
+        } else if (!added && !updated && !favAdded) toast("导入完成：没有新进度");
         else
           toast(
             "导入完成：" + added + " 新增 · " + updated + " 更新" +
@@ -3667,6 +3728,22 @@
         judge(null);
       },
       continue: function () {
+        /* 完成页的「下一组」（契约 §6.1，v1.16）：还有没背完的组就跳过去，
+           全书都背完就回词库。老实现只认 reveal 三态，这个按钮点了完全没反应。 */
+        if (state.session.phase === "done") {
+          if (!gated()) return;
+          /* 空词本没有「下一组」可去，也不该把用户送到词库页 */
+          if (!(book.words || []).length) return;
+          var next = core.schedule.nextGroup(book, wmap(), state.sched.g);
+          if (next) {
+            state.sched = next;
+            nextCard();
+          } else {
+            state.ui.route = "library";
+            state.ui.listFilter = null;
+          }
+          return;
+        }
         if (!isReviewPhase(state.session.phase) || !gated()) return;
         clearFlash();
         state.undo = null;
@@ -3751,11 +3828,21 @@
     save(); // 启动即 flush：迁移（v6→v7）后立即落成新格式档
     autoSpeakCurrent(); // 启动就在学习页时，第一张卡也要读
 
+    /* 只有「自己会接管那 1 秒」的动作才允许取消定时器（v1.16）。
+       老实现是「除 answer/skip 外一律 clear」：在 flash|hold 那 1 秒里点一下 ♪
+       （或者收藏 / 备注 / 换页 / 换主题），定时器被掐掉且不再武装，界面就永远
+       停在揭示态 —— 手机端那个态没有 CTA，只能刷新。这 8 个动作都会自己
+       重建 sched / 换词，所以必须保留 clear。 */
+    var CLEARS_FLASH = {
+      answer: 1, skip: 1, continue: 1, undo: 1,
+      master: 1, reset: 1, pickGroup: 1, pickBook: 1
+    };
+
     function dispatch(a) {
       if (!a || typeof a.type !== "string") return;
       var fn = ACTIONS[a.type];
       if (!fn) return; // 未列出的 action 一律忽略，不抛错（§7）
-      if (a.type !== "answer" && a.type !== "skip") clearFlash();
+      if (CLEARS_FLASH[a.type]) clearFlash();
       fn(a);
       save();
       emit();
@@ -3963,6 +4050,7 @@
       },
       write: function (key, s) {
         data[key] = String(s); // 同步：core 判分路径直接调用，不许包 Promise
+        return true; // v1.16：false 表示没写进去，core 据此提示用户
       },
       remove: function (key) {
         delete data[key];
@@ -4002,8 +4090,12 @@
       write: function (key, s) {
         try {
           ls.setItem(key, String(s)); // 同步
+          return true;
         } catch (e) {
-          /* 配额满等写入失败：静默降级，不阻断判分（core 的 save 也已兜底） */
+          /* 配额满等写入失败：**返回 false**，不抛（不阻断判分），
+             由 core 的 save 提示用户「进度没存上」（v1.16 —— 以前是静默的，
+             配额满了以后新进度一条都落不了盘，用户零感知）。 */
+          return false;
         }
       },
       remove: function (key) {
@@ -4059,7 +4151,19 @@
      2. 切词先 cancel：speak 入口无条件先 cancel（调用方切词后必走 speak/停口）
      3. available 为假时静默降级：speak/cancel 都是空操作
      4. 任何异常不外抛：所有 speechSynthesis 调用包 try/catch
+
+   v1.16 补两条（2026-11-25 用户报「读音变形」；根因与四级单词记忆脚本 v6.6.2 同一个坑）：
+     5. **必须自己挑语音**。macOS 上 Chrome 的 en-US 列表前面全是趣味语音
+        （Albert / Zarvox / Bubbles / Bad News / Trinoids…），Albert 还被标成 default。
+        只给 u.lang 不给 u.voice = 让系统默认（多半是 Albert）去念，听感就是
+        「机器人乱念 / 音频坏了」—— 这就是用户说的「变形」。
+     6. **utterance 要留强引用**。Chrome 会把没人持有的 utterance GC 掉，
+        长例句（现在有例句朗读）会念到一半停住。held 里留最近 8 个，念完摘掉。
+
+   没有做「排队」：契约要求新朗读先 cancel 旧的，所以不需要 busy/看门狗那一套
+   （老项目那套是因为它换词不 cancel、需要自己记在念哪一句）。
    WC.adapters.speech        真实实现（无 speechSynthesis 时自动是静默版）
+   WC.adapters.createSpeech  同上，工厂版：测试注入假 synth / 假 Utterance
    WC.adapters.silentSpeech() 空实现：测试与显式降级用 */
 (function (root) {
   "use strict";
@@ -4070,19 +4174,72 @@
     return { available: false, speak: function () {}, cancel: function () {} };
   }
 
-  var synth = null;
-  try {
-    synth = root.speechSynthesis || null;
-  } catch (e) {
-    synth = null;
-  }
-  var Utterance = root.SpeechSynthesisUtterance || null;
-  var usable = !!(synth && Utterance && typeof synth.speak === "function");
+  /* 趣味语音黑名单：念单词完全听不清，听起来像音频损坏。
+     白名单只是「优先」，命中就用；一个都没命中就取第一个非黑名单的 en 语音。 */
+  var BAD = /albert|bad news|bahh|bells|boing|bubbles|cellos|deranged|good news|jester|organ|ralph|trinoids|whisper|wobble|zarvox|superstar|grandma|grandpa|junior|kathy|rocko|shelley|sandy|eddy|reed|flo/i;
+  var GOOD = /^(samantha|ava|allison|susan|alex|tom|nicky|aaron|serena|tessa|karen|moira|daniel|kate|arthur|martha|google us english|microsoft (aria|jenny|guy|zira|david|mark))/i;
 
-  function webSpeech() {
+  function createSpeech(synth, Utterance) {
+    var seq = 0;
+    var held = []; // 强引用池：防 Chrome 把正在念的 utterance GC 掉
+    var pick = null; // 选中的语音（缓存）
+    var picked = false; // 是否已经挑过（列表为空时允许重新挑）
+
+    function allVoices() {
+      try {
+        return typeof synth.getVoices === "function" ? synth.getVoices() || [] : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function pickVoice() {
+      if (picked) return pick;
+      var all = allVoices();
+      if (!all.length) return null; // 还没加载好：这次不指定，交给系统默认（通常是人声），下次再挑
+      var en = [];
+      var i;
+      for (i = 0; i < all.length; i++) {
+        if (/^en[-_]US/i.test(all[i].lang) && !BAD.test(all[i].name)) en.push(all[i]);
+      }
+      if (!en.length) {
+        for (i = 0; i < all.length; i++) {
+          if (/^en/i.test(all[i].lang) && !BAD.test(all[i].name)) en.push(all[i]);
+        }
+      }
+      for (i = 0; i < en.length; i++) {
+        if (GOOD.test(en[i].name)) {
+          pick = en[i];
+          break;
+        }
+      }
+      if (!pick) pick = en[0] || null;
+      picked = true;
+      return pick;
+    }
+
+    /* 语音列表变了（macOS 装新音色 / 首次异步加载完成）就重挑 */
+    function resetVoice() {
+      pick = null;
+      picked = false;
+    }
+    try {
+      if (typeof synth.addEventListener === "function") {
+        synth.addEventListener("voiceschanged", resetVoice);
+      } else {
+        synth.onvoiceschanged = resetVoice;
+      }
+    } catch (e) {
+      /* 铁律 4 */
+    }
+
+    function forget(u) {
+      var i = held.indexOf(u);
+      if (i >= 0) held.splice(i, 1);
+    }
+
     /* Chrome 里 cancel() 之后立刻 speak() 有概率把新句子也吞掉（尤其连续切词时）。
        用序号 + 一个 tick 的延迟，既保证「只读最后一句」，又给引擎留出清理窗口。 */
-    var seq = 0;
     return {
       available: true,
       speak: function (text, opts) {
@@ -4096,13 +4253,22 @@
         }
         var fire = function () {
           if (mine !== seq) return; // 期间又来了新句子，这句作废
+          var u = null;
           try {
             if (synth.paused) synth.resume(); // Chrome 偶发自己 pause，先拉回来
-            var u = new Utterance(String(text));
+            u = new Utterance(String(text));
             u.lang = typeof opts.lang === "string" && opts.lang ? opts.lang : "en-US";
             if (typeof opts.rate === "number" && opts.rate > 0) u.rate = opts.rate;
+            var v = pickVoice();
+            if (v) u.voice = v; // v1.16：不指定就等于让 Albert 念
+            /* 强引用 + onend 摘除；最多留 8 个，onend 丢失时也不会无限增长 */
+            held.push(u);
+            if (held.length > 8) held.shift();
+            u.onend = function () { forget(u); };
+            u.onerror = function () { forget(u); };
             synth.speak(u);
           } catch (e) {
+            if (u) forget(u);
             /* 铁律 4：异常不外抛 */
           }
         };
@@ -4110,6 +4276,7 @@
       },
       cancel: function () {
         seq++;
+        held.length = 0;
         try {
           synth.cancel();
         } catch (e) {
@@ -4119,8 +4286,18 @@
     };
   }
 
+  var synth = null;
+  try {
+    synth = root.speechSynthesis || null;
+  } catch (e) {
+    synth = null;
+  }
+  var Utterance = root.SpeechSynthesisUtterance || null;
+  var usable = !!(synth && Utterance && typeof synth.speak === "function");
+
   adapters.silentSpeech = silentSpeech;
-  adapters.speech = usable ? webSpeech() : silentSpeech(); // 铁律 3：不可用静默降级
+  adapters.createSpeech = createSpeech;
+  adapters.speech = usable ? createSpeech(synth, Utterance) : silentSpeech(); // 铁律 3：不可用静默降级
 })(typeof globalThis !== "undefined" ? globalThis : this);
 
 /* ──────── src/adapters/transfer.js ──────── */
@@ -4213,8 +4390,10 @@
     var localV = typeof local.v === "number" ? local.v : VERSION;
     var inV = typeof incoming.v === "number" ? incoming.v : 0;
     if (inV > localV) {
-      /* v 比本地高：整包拒绝（§8），一条都不缝进来 */
+      /* v 比本地高：整包拒绝（§8），一条都不缝进来。
+         tooNew 是给调用方分文案用的：rejected 也可能是「逐词 at 更旧」。 */
       report.rejected = Math.max(1, countWords(incoming.books));
+      report.tooNew = 1;
       return { state: localState, report: report };
     }
     if (inV < localV && WC.core && WC.core.migrate && typeof WC.core.migrate.anyToCurrent === "function") {
@@ -4304,6 +4483,17 @@
       }
     }
     out.fav = outFav;
+
+    /* 设置随档走（v1.16）：以前只合并 books/log/fav，换设备导入后主题 / 朗读开关
+       不跟随，得重新设一遍。只认三个已知键，坏值一律忽略、保留本地。 */
+    var ip = incoming.p;
+    if (ip && typeof ip === "object") {
+      var op = clone(local.p && typeof local.p === "object" ? local.p : {});
+      if (ip.theme === "g1" || ip.theme === "g2" || ip.theme === "g3") op.theme = ip.theme;
+      if (typeof ip.autoSpeak === "boolean") op.autoSpeak = ip.autoSpeak;
+      if (ip.side === "grad" || ip.side === "white") op.side = ip.side;
+      out.p = op;
+    }
 
     return { state: out, report: report };
   }
