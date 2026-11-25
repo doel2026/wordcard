@@ -1,4 +1,4 @@
-/* app.css —— 由 build/concat.py 拼接，禁止手改。内容哈希：9f3950f265 */
+/* app.css —— 由 build/concat.py 拼接，禁止手改。内容哈希：f152e12df3 */
 
 /* ──────── src/ui/shared/tokens.css ──────── */
 /* tokens.css —— 由 build/gen_tokens.py 从 build/tokens.json 生成，禁止手改。
@@ -191,6 +191,18 @@ p{margin:0}
 .wc-opt.is-wrong .wc-cn{color:var(--err-ink)}
 .wc-opt.is-muted{opacity:.55}
 .wc-opt.is-locked{cursor:default}
+/* 揭示后干扰项后面挂的那个词（contract v1.12）：只在 detail/flash 出现，
+   ask 阶段没有这个 span，所以选项高度不会跳。 */
+.wc-opt .wc-opt-w{
+  margin-left:6px;font-size:var(--fs-small);font-style:italic;
+  color:var(--canvas-sub);
+}
+.wc-opt .wc-opt-w::before{
+  content:"·";margin-right:4px;font-style:normal;
+}
+.wc-opt.is-wrong .wc-opt-w{color:var(--err-pos)}
+/* muted 本来压到 .55，带上词之后要看不清了，稍微提一点；重音色仍留给答案 */
+.wc-opt.is-muted.has-w{opacity:.82}
 
 /* ── 按钮 ─────────────────────────────────────────────── */
 .wc-btn{
