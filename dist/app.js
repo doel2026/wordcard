@@ -1,5 +1,5 @@
 /* app.js —— 由 build/concat.py 拼接，禁止手改。
-   内容哈希：b12b7c91f6  prod  22 个文件
+   内容哈希：8e9f9e6755  prod  22 个文件
    顺序见 build/manifest.json */
 
 /* ──────── src/ui/shared/dom.js ──────── */
@@ -188,6 +188,88 @@
   function toast(t) {
     if (!t) return null;
     return h("div", { class: "wc-toast" + (t.kind === "err" ? " is-err" : ""), role: "status", text: t.text });
+  }
+
+  /* 重置确认流程（v1.14）：选档位 → 执行 → 结果提示。
+     桌面和手机只有弹层样式不同（cls），流程和文案必须一模一样，所以放这里。
+
+     两档差别就一句话：
+       progress  清记忆，留下备注、收藏和统计 —— 背第二遍用这个
+       all       连统计和收藏一起清 —— 只有「想彻底忘掉这件事」才选
+
+     onRun(mode) 由调用方给（app.js 的 resetGame），返回 Promise。
+     执行前那边会先备份；备份失败会返回 ok:false，这里只负责把话说清楚。 */
+  function resetSheet(o) {
+    var opts = o || {};
+    var cls = opts.cls || "";
+
+    function open(items) {
+      sheet({ cls: cls, items: items });
+    }
+
+    function run(mode) {
+      if (!opts.onRun) return;
+      var p = opts.onRun(mode);
+      if (!p || !p.then) return;
+      p.then(function (r) {
+        if (!r || !r.ok) {
+          open([
+            {
+              label:
+                r && r.reason === "backup-failed"
+                  ? "备份没写成功，重置已取消 —— 进度一个字没动"
+                  : "重置失败：" + ((r && r.reason) || "未知原因"),
+              danger: true
+            },
+            { label: "知道了" }
+          ]);
+          return;
+        }
+        /* 重置完最该知道的是「刚才那份存哪了」。浏览器里没有自动备份，
+           就退一步提醒导出。 */
+        if (r.backup) {
+          open([
+            {
+              label: "已备份 " + r.backup,
+              onSelect: function () {
+                if (WC.app && WC.app.openBackupFolder) WC.app.openBackupFolder();
+              }
+            },
+            { label: "知道了" }
+          ]);
+        } else {
+          open([
+            {
+              label: "这里没有自动备份 · 导出一份留着",
+              onSelect: function () {
+                if (WC.app && WC.app.exportFile) WC.app.exportFile();
+              }
+            },
+            { label: "知道了" }
+          ]);
+        }
+      });
+    }
+
+    open([
+      {
+        label: "重来这一遍 · 清空记忆，保留备注和统计",
+        onSelect: function () {
+          run("progress");
+        }
+      },
+      {
+        label: "彻底清空 · 连统计和收藏一起清",
+        danger: true,
+        onSelect: function () {
+          open([
+            { label: "确定彻底清空？日志和收藏都会没有", danger: true, onSelect: function () { run("all"); } },
+            { label: "取消" }
+          ]);
+        }
+      },
+      { label: "取消" }
+    ]);
   }
 
   /* 底部菜单；插入 body，返回 {close} */
@@ -422,7 +504,7 @@
 
   WC.ui = {
     icon: icon, option: option, button: button, speakButton: speakButton,
-    cells: cells, rows: rows, toast: toast, sheet: sheet, ding: ding,
+    cells: cells, rows: rows, toast: toast, sheet: sheet, resetSheet: resetSheet, ding: ding,
     statMetrics: statMetrics, statChart: statChart, statRows: statRows
   };
 })(window.WC = window.WC || {});
@@ -1025,7 +1107,24 @@
                 h("span", { text: "备份" }),
                 h("span", { class: "mob-row-hint", text: "打开文件夹" })
               )
-            : null
+            : null,
+          h(
+            "button",
+            {
+              class: "wc-row",
+              type: "button",
+              on: {
+                click: function () {
+                  if (!WC.ui || !WC.ui.resetSheet || !WC.app || !WC.app.resetGame) return;
+                  WC.ui.resetSheet({
+                    onRun: function (mode) { return WC.app.resetGame(mode); }
+                  });
+                }
+              }
+            },
+            h("span", { text: "重置" }),
+            h("span", { class: "mob-row-hint", text: "背完重来一遍" })
+          )
         )
       )
     );
@@ -1749,6 +1848,18 @@
       if (WC.app && WC.app.backupEnabled && WC.app.backupEnabled()) {
         dataRows.push(["备份", "打开文件夹", function () { if (WC.app) WC.app.openBackupFolder(); }]);
       }
+      /* 重置：背完一遍之后再背一遍。危险操作，流程（两档 + 确认 + 备份）在 WC.ui.resetSheet */
+      dataRows.push([
+        "重置",
+        "背完重来一遍",
+        function () {
+          if (!WC.ui || !WC.ui.resetSheet || !WC.app || !WC.app.resetGame) return;
+          WC.ui.resetSheet({
+            cls: "desk-sheet",
+            onRun: function (mode) { return WC.app.resetGame(mode); }
+          });
+        }
+      ]);
       dataRows.forEach(function (row) {
         data.appendChild(
           h(
@@ -3499,6 +3610,62 @@
           );
       },
 
+      /* 重置（v1.14）：背完一遍后重来一遍。
+           mode:"progress"（默认）清记忆，留下备注、收藏和统计
+           mode:"all"      连日志和收藏一起清，等于刚装的样子
+         文件层面的备份由 app.js 在 dispatch **之前**做——core 不碰文件系统，
+         也不该假装知道「备份」这回事。 */
+      reset: function (a) {
+        var mode = a && a.mode === "all" ? "all" : "progress";
+        var n = 0;
+        for (var id in state.books) {
+          var b = state.books[id];
+          if (!b || typeof b !== "object") continue;
+          if (!b.w || typeof b.w !== "object") b.w = {};
+          for (var w in b.w) {
+            var ws = b.w[w];
+            /* 只有「背过」的词才计入 reset 计数：只写过备注、没答过的词
+               重置前后是同一个状态，算进去会让「已重置 N 词」虚高。 */
+            if (ws && ((ws.ok | 0) > 0 || (ws.bad | 0) > 0 || (ws.rev | 0) > 0)) n++;
+            /* 备注是手写内容，不是「背了多少」—— 重置进度必须留着它，
+               否则用户第一遍辛苦抄的例句、易混点会被顺手抹掉。 */
+            var note = mode === "progress" && ws && typeof ws.note === "string" ? ws.note : "";
+            if (!note) delete b.w[w];
+            else b.w[w] = { ok: 0, bad: 0, rev: 0, at: 0, note: note };
+          }
+        }
+        if (mode === "all") {
+          state.log = [];
+          state.fav = {};
+        } else if (n > 0) {
+          /* 留一条分界：将来统计要「只看这一遍」时，靠它切。现在分析页只认
+             pick / skip / master，这条不会被算进任何数字（§2.6）。 */
+          core.log.append(state.log, {
+            w: "", b: book.id, g: 0, ok: 0, k: "reset", ms: 0, opts: [], picked: null,
+            t: clock.now()
+          });
+        }
+        state.seen = {};
+        state.undo = null;
+        state.ui.route = "learn";
+        state.ui.listFilter = null;
+        clearFlash();
+        var sched = core.schedule.initGroup(book, wmap(), 1);
+        while (core.schedule.done(sched) && sched.g < book.groups) {
+          sched = core.schedule.initGroup(book, wmap(), sched.g + 1);
+        }
+        state.sched = sched;
+        nextCard();
+        dirty = true;
+        toast(
+          mode === "all"
+            ? "已彻底清空"
+            : n > 0
+              ? "已重置：" + n + " 词回到未学"
+              : "本来就是清的，没有可重置的进度"
+        );
+      },
+
       answer: function (a) {
         if (state.session.phase !== "ask" || !gated()) return;
         var i = Math.floor(Number(a.i));
@@ -4207,6 +4374,42 @@ WC.books["cet4-key600"] = {"id":"cet4-key600","name":"四级重点词汇600","gr
     scheduleBackup();
   }
 
+  /* 重置：先存一份备份，确认它真落了盘，再动数据。
+     备份失败就**不重置** —— 宁可这次没重来，也不能让进度无路可退。
+     唯一的例外是「本来就没有词条」（no-words）：那是空档，没什么可丢的。 */
+  function resetGame(mode) {
+    var m = mode === "all" ? "all" : "progress";
+    if (!engine || !engine.exportText) return Promise.resolve({ ok: false, reason: "no-engine" });
+
+    var pre;
+    if (backupEnabled()) {
+      try {
+        pre = Promise.resolve(window.WCBackup.auto(engine.exportText()));
+      } catch (e) {
+        pre = Promise.resolve({ ok: false, reason: "throw" });
+      }
+    } else {
+      /* 浏览器 / 线上版没有自动备份。UI 那边会先提醒「建议先导出」。 */
+      pre = Promise.resolve(null);
+    }
+
+    return pre
+      .then(function (r) {
+        var needsBackup = backupEnabled();
+        var nothingToLose = r && r.reason === "no-words";
+        if (needsBackup && (!r || !r.ok) && !nothingToLose) {
+          return { ok: false, reason: "backup-failed", detail: r || null };
+        }
+        dispatch({ type: "reset", mode: m });
+        /* 记一笔，别让 6 秒后的排队备份又把空档试一遍 */
+        bkLastAt = Date.now();
+        return { ok: true, mode: m, backup: (r && r.name) || null };
+      })
+      .catch(function (e) {
+        return { ok: false, reason: "throw", message: String((e && e.message) || e) };
+      });
+  }
+
   /* ── 自动备份（只有 macOS 壳里有 window.WCBackup） ────────────
      浏览器 / 线上版没有这个对象，整段自动空转，线上行为一个字不变。
 
@@ -4361,6 +4564,7 @@ WC.books["cet4-key600"] = {"id":"cet4-key600","name":"四级重点词汇600","gr
     /* 自动备份：浏览器里 backupEnabled() 为 false，UI 据此决定显不显示入口 */
     backupEnabled: backupEnabled,
     backupNow: flushBackup,
+    resetGame: resetGame,
     backupInfo: function () {
       if (!backupEnabled()) return Promise.resolve(null);
       return Promise.resolve(window.WCBackup.info()).catch(function () { return null; });
