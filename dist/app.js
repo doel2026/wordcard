@@ -1,5 +1,5 @@
 /* app.js —— 由 build/concat.py 拼接，禁止手改。
-   内容哈希：7f372f11c9  prod  22 个文件
+   内容哈希：45026e5416  prod  22 个文件
    顺序见 build/manifest.json */
 
 /* ──────── src/ui/shared/dom.js ──────── */
@@ -264,6 +264,49 @@
     ]);
   }
 
+  /* 复习询问弹层（v1.17）：到期复习词每天问一次，两端只有样式不同（cls），
+     流程一致所以放这里。点遮罩直接关掉 = 「今天先背新词」—— 不算回答的话
+     下次渲染又会弹出来。onClose 在任意一种收场后各调一次（UI 用来复位防重入）。 */
+  function reviewSheet(o) {
+    var opts = o || {};
+    var chosen = false;
+    var closed = false;
+    function done() {
+      if (closed) return;
+      closed = true;
+      if (opts.onClose) opts.onClose();
+    }
+    sheet({
+      cls: opts.cls || "",
+      items: [
+        {
+          label: "先复习（" + opts.due + " 词到期）",
+          onSelect: function () {
+            chosen = true;
+            if (opts.onReview) opts.onReview();
+            done();
+          }
+        },
+        {
+          label: "今天先背新词",
+          onSelect: function () {
+            chosen = true;
+            if (opts.onLater) opts.onLater();
+            done();
+          }
+        }
+      ],
+      /* sheet 的点击路径是 close() → onSelect()：onClose 里的判断要推迟一拍，
+         等 onSelect 把 chosen 置上再看，否则按钮也会被当成「点遮罩关掉」 */
+      onClose: function () {
+        setTimeout(function () {
+          if (!chosen && opts.onLater) opts.onLater();
+          done();
+        }, 0);
+      }
+    });
+  }
+
   /* 底部菜单；插入 body，返回 {close} */
   function sheet(o) {
     var scrim = h("div", { class: "wc-scrim", on: { click: close } });
@@ -496,7 +539,7 @@
 
   WC.ui = {
     icon: icon, option: option, button: button, speakButton: speakButton,
-    cells: cells, rows: rows, toast: toast, sheet: sheet, resetSheet: resetSheet, ding: ding,
+    cells: cells, rows: rows, toast: toast, sheet: sheet, resetSheet: resetSheet, reviewSheet: reviewSheet, ding: ding,
     statMetrics: statMetrics, statChart: statChart, statRows: statRows
   };
 })(window.WC = window.WC || {});
@@ -608,36 +651,66 @@
   function openMenu(vm, dispatch) {
     var word = vm.learn && vm.learn.word;
     if (!word) return;
-    WC.ui.sheet({
-      items: [
-        {
-          label: word.fav ? "取消收藏" : "收藏",
-          onSelect: function () {
-            dispatch({ type: word.fav ? "unfav" : "fav" });
-          }
-        },
-        {
-          label: "标为已掌握",
-          onSelect: function () {
-            dispatch({ type: "master" });
-          }
-        },
-        {
-          label: "备注",
-          onSelect: function () {
-            // 契约 §7 要求 { type:"note", text }。手机端先用 prompt 收文本，
-            // 与桌面端一致；后面换成 sheet + textarea 时只改这一处。
-            var text = window.prompt("备注", word.note || "");
-            if (text !== null) dispatch({ type: "note", text: text });
-          }
-        },
-        {
-          label: "朗读",
-          onSelect: function () {
-            dispatch({ type: "speak" });
-          }
+    var items = [
+      {
+        label: word.fav ? "取消收藏" : "收藏",
+        onSelect: function () {
+          dispatch({ type: word.fav ? "unfav" : "fav" });
         }
-      ]
+      },
+      {
+        label: "标为已掌握",
+        onSelect: function () {
+          dispatch({ type: "master" });
+        }
+      },
+      {
+        label: "备注",
+        onSelect: function () {
+          // 契约 §7 要求 { type:"note", text }。手机端先用 prompt 收文本，
+          // 与桌面端一致；后面换成 sheet + textarea 时只改这一处。
+          var text = window.prompt("备注", word.note || "");
+          if (text !== null) dispatch({ type: "note", text: text });
+        }
+      },
+      {
+        label: "朗读",
+        onSelect: function () {
+          dispatch({ type: "speak" });
+        }
+      }
+    ];
+    /* 复习会话里多一个出口（v1.17）：中途退出，回正常学习 */
+    if (vm.learn.review) {
+      items.push({
+        label: "结束复习",
+        onSelect: function () {
+          dispatch({ type: "endReview" });
+        }
+      });
+    }
+    WC.ui.sheet({ items: items });
+  }
+
+  /* 复习询问弹窗（v1.17）：VM 说该弹（reviewPrompt 非 null）才弹。
+     reviewPromptOpen 防重入 —— flash/toast 的定时器也会触发 render，
+     不挡的话弹窗会一层叠一层。 */
+  var reviewPromptOpen = false;
+  function maybePromptReview(vm, dispatch) {
+    if (!vm.reviewPrompt || reviewPromptOpen || !WC.ui.reviewSheet) return;
+    reviewPromptOpen = true;
+    WC.ui.reviewSheet({
+      due: vm.reviewPrompt.due,
+      onReview: function () {
+        dispatch({ type: "reviewAsked" });
+        dispatch({ type: "startReview", source: "due" });
+      },
+      onLater: function () {
+        dispatch({ type: "reviewAsked" });
+      },
+      onClose: function () {
+        reviewPromptOpen = false;
+      }
     });
   }
 
@@ -649,9 +722,11 @@
     var learn = vm.learn;
     var empty = !vm.book || vm.book.total === 0;
     var group = vm.counts && vm.counts.group ? vm.counts.group : { mastered: 0, size: 0 };
-    /* v1.16：真的走到 done 时全书已经背完了（advanceGroups 会自动跳组），
-       所以这时说「全书完成」，别再说「本组完成」。 */
+    /* v1.16：走到 done 时新词已经过完（advanceGroups 会自动跳组）。
+       v1.17：done 有两种 —— 全书真背完（全掌握）说「全书完成」；
+       新词过完但还有词在待复习，说「新词背完了」并把去向交给 CTA（去复习）。 */
     var allDone = !empty && vm.counts && vm.counts.mastered >= vm.counts.total;
+    var pendingN = learn.pending || 0;
 
     var page = h("main", { class: "mob-page mob-learn mob-done" });
     page.appendChild(
@@ -660,7 +735,10 @@
 
     var box = h("div", { class: "mob-done-box" });
     box.appendChild(
-      h("div", { class: "mob-done-title", text: empty ? "还没有词本" : allDone ? "全书完成" : "本组完成" })
+      h("div", {
+        class: "mob-done-title",
+        text: empty ? "还没有词本" : allDone ? "全书完成" : pendingN > 0 ? "新词背完了" : "本组完成"
+      })
     );
     box.appendChild(
       h("div", {
@@ -669,6 +747,8 @@
           ? "词本接入后就能开始背了"
           : allDone
           ? vm.counts.mastered + " / " + vm.counts.total + " 已掌握"
+          : pendingN > 0
+          ? "还有 " + pendingN + " 个词在待复习"
           : group.mastered + " / " + group.size + " 已掌握"
       })
     );
@@ -866,6 +946,23 @@
       )
     );
     page.appendChild(h("div", { class: "mob-list-h", text: L.title }));
+
+    /* 待复习列表的主动入口（v1.17）：全部待复习词开一场复习会话 */
+    if (L.key === "review" && L.total > 0) {
+      page.appendChild(
+        h(
+          "div",
+          { class: "mob-cta" },
+          WC.ui.button({
+            label: "现在开始复习（" + L.total + " 词）",
+            kind: "primary",
+            onClick: function () {
+              dispatch({ type: "startReview", source: "all" });
+            }
+          })
+        )
+      );
+    }
 
     var card = h("div", { class: "wc-card mob-list-card" });
     if (!L.words.length) {
@@ -1307,6 +1404,8 @@
       if (anchor) anchor.insertBefore(toast, anchor.firstChild);
       else page.appendChild(toast);
     }
+
+    maybePromptReview(vm, dispatch);
   }
 
   WC.mobile = { render: render };
@@ -1608,9 +1707,7 @@
 
     var isAsk = learn.phase === "ask";
 
-    var left = h(
-      "div",
-      { class: "desk-foot-left" },
+    var leftKids = [
       h(
         "button",
         {
@@ -1638,7 +1735,27 @@
         },
         "标为已掌握"
       )
-    );
+    ];
+    /* 复习会话的中途出口（v1.17） */
+    if (learn.review) {
+      leftKids.push(h("span", { class: "desk-dot", "aria-hidden": "true", text: "·" }));
+      leftKids.push(
+        h(
+          "button",
+          {
+            class: "desk-link",
+            type: "button",
+            on: {
+              click: function () {
+                send(dispatch, { type: "endReview" });
+              }
+            }
+          },
+          "结束复习"
+        )
+      );
+    }
+    var left = h("div", { class: "desk-foot-left" }, leftKids);
 
     /* 那 1 秒里的右下角提示要说实话：flash 是直接走，hold 是看完转详情 */
     var right;
@@ -1661,7 +1778,7 @@
 
   /* ── 词汇列表（收藏 / 待复习 / 已掌握 / 全部） ───────── */
 
-  function buildList(vm) {
+  function buildList(vm, dispatch) {
     var L = vm.list;
     var main = h("main", { class: "desk-main desk-list" });
     main.appendChild(
@@ -1672,6 +1789,22 @@
         h("div", { class: "desk-list-n", text: L.total + " 词" })
       )
     );
+    /* 待复习列表的主动入口（v1.17）：全部待复习词开一场复习会话 */
+    if (L.key === "review" && L.total > 0) {
+      main.appendChild(
+        h(
+          "div",
+          { class: "desk-detail-cta" },
+          WC.ui.button({
+            label: "现在开始复习（" + L.total + " 词）",
+            kind: "primary",
+            onClick: function () {
+              send(dispatch, { type: "startReview", source: "all" });
+            }
+          })
+        )
+      );
+    }
     var card = h("section", { class: "desk-list-card" });
     if (!L.words.length) {
       card.appendChild(
@@ -2006,7 +2139,7 @@
       return main;
     }
     if (vm.list) {
-      return buildList(vm);
+      return buildList(vm, dispatch);
     }
     if (vm.learn && vm.learn.phase === "done") {
       main.appendChild(buildTop(vm, dispatch));
@@ -2028,13 +2161,19 @@
     var learn = vm.learn;
     var empty = !vm.book || vm.book.total === 0;
     var group = (vm.counts && vm.counts.group) || { mastered: 0, size: 0 };
-    /* v1.16：走到 done 时全书已经背完（advanceGroups 自动跳组），文案跟着改 */
+    /* v1.16：走到 done 时新词已经过完（advanceGroups 自动跳组）。
+       v1.17：done 有两种 —— 全书真背完（全掌握）说「全书完成」；
+       新词过完但还有词在待复习，说「新词背完了」并把去向交给 CTA（去复习）。 */
     var allDone = !empty && vm.counts && vm.counts.mastered >= vm.counts.total;
+    var pendingN = learn.pending || 0;
 
     var card = h("section", { class: "desk-card t-" + themeOf(vm) + " desk-done" });
     var box = h("div", { class: "desk-done-box" });
     box.appendChild(
-      h("div", { class: "desk-done-title", text: empty ? "还没有词本" : allDone ? "全书完成" : "本组完成" })
+      h("div", {
+        class: "desk-done-title",
+        text: empty ? "还没有词本" : allDone ? "全书完成" : pendingN > 0 ? "新词背完了" : "本组完成"
+      })
     );
     box.appendChild(
       h("div", {
@@ -2043,6 +2182,8 @@
           ? "把 cet4 词本放进 src/data/books 再重新构建"
           : allDone
           ? vm.counts.mastered + " / " + vm.counts.total + " 已掌握"
+          : pendingN > 0
+          ? "还有 " + pendingN + " 个词在待复习"
           : group.mastered + " / " + group.size + " 已掌握"
       })
     );
@@ -2119,6 +2260,28 @@
 
   var lastPhase = null;
 
+  /* 复习询问弹窗（v1.17）：VM 说该弹才弹；reviewPromptOpen 防重入 —
+     flash/toast 定时器也会触发 render，不挡会一层叠一层。 */
+  var reviewPromptOpen = false;
+  function maybePromptReview(vm, dispatch) {
+    if (!vm.reviewPrompt || reviewPromptOpen || !WC.ui.reviewSheet) return;
+    reviewPromptOpen = true;
+    WC.ui.reviewSheet({
+      due: vm.reviewPrompt.due,
+      cls: "desk-sheet",
+      onReview: function () {
+        send(dispatch, { type: "reviewAsked" });
+        send(dispatch, { type: "startReview", source: "due" });
+      },
+      onLater: function () {
+        send(dispatch, { type: "reviewAsked" });
+      },
+      onClose: function () {
+        reviewPromptOpen = false;
+      }
+    });
+  }
+
   function render(vm, root, dispatch) {
     if (!vm || !root) return;
     /* 每次判分（ask → flash/hold）响一次：答对高音、答错 / 跳过低音。
@@ -2147,6 +2310,8 @@
 
     var toast = WC.ui.toast(vm.toast);
     if (toast) root.appendChild(toast);
+
+    maybePromptReview(vm, dispatch);
   }
 
   /* ── 键盘 ─────────────────────────────────────────────── */
@@ -2308,6 +2473,14 @@
     return !!ws && ws.ok >= 3 && !pendingReview(ws);
   }
 
+  /* 待复习词今天是否「到期」（§2.4，v1.17）：最后作答日早于今天（本地日历日）。
+     当天刚答过的词不算到期 —— 间隔重复的底线是隔夜，否则测的是短时记忆。 */
+  function reviewDue(ws, today) {
+    if (!pendingReview(ws)) return false;
+    var at = typeof ws.at === "number" ? ws.at : 0;
+    return dayOf(at) < today;
+  }
+
   /* 五分类，互斥且完备：mastered + pending + learning + new + untouched === 组词数。
      new = 有记录但零进度（如只写过备注），untouched = 无记录。 */
   function classify(ws) {
@@ -2373,6 +2546,7 @@
   core.derive = {
     pendingReview: pendingReview,
     mastered: mastered,
+    reviewDue: reviewDue,
     classify: classify,
     summarize: summarize,
     dayOf: dayOf,
@@ -2448,7 +2622,8 @@
   var WINDOW = 10;
 
   /* 进组：该组未掌握词按书中原顺序取前 WINDOW 个进 queue，其余进 pool。
-     「未掌握」含待复习（§2.4：pendingReview 不算 mastered）。
+     v1.17 起「未掌握」不再含待复习：待复习词退出新词队列，只通过复习会话
+     （弹窗 / 「现在开始复习」，§4.1）回来 —— 当天错完立刻再考测的是短时记忆。
      组词集合固定，不因掌握而缩小（§4）。 */
   function initGroup(book, wmap, g) {
     var queue = [];
@@ -2457,7 +2632,8 @@
     for (var i = 0; i < words.length; i++) {
       var w = words[i];
       if (w.g !== g) continue;
-      if (core.derive.mastered(wmap ? wmap[w.w] : null)) continue;
+      var ws = wmap ? wmap[w.w] : null;
+      if (core.derive.mastered(ws) || core.derive.pendingReview(ws)) continue;
       if (queue.length < WINDOW) queue.push(w.w);
       else pool.push(w.w);
     }
@@ -2696,7 +2872,7 @@
 
   /* 运行时专用键：落盘时剔除（§2.5 只落 ProgressFile），其余键（含未知字段）原样保留 */
   /* fav 已改为持久化（契约 v1.4）：收藏列表是可见功能，刷新就清空等于没有 */
-  var RUNTIME = { sched: 1, session: 1, ui: 1, undo: 1, seen: 1, book: 1, clock: 1, bookIdx: 1, allBooks: 1 };
+  var RUNTIME = { sched: 1, session: 1, ui: 1, undo: 1, seen: 1, review: 1, book: 1, clock: 1, bookIdx: 1, allBooks: 1 };
 
   function fresh(active) {
     return {
@@ -3059,10 +3235,16 @@
     var s = state.session;
     var g = state.sched.g;
     var gstat = sum.byGroup[g] || { size: 0, mastered: 0 };
+    /* 复习会话（§4.1，v1.17）：头部换成「复习 · pos / total」，组进度让位 */
+    var rv = state.review || null;
     /* 本组第几张 = 组词数 − 剩余未掌握(queue+pool) + 1，恒在 [1, size] */
     var remaining = state.sched.queue.length + state.sched.pool.length;
     var pos = gstat.size === 0 ? 0 : Math.min(gstat.size, gstat.size - remaining + 1);
     var head = "第 " + g + " 组 · " + pos + " / " + gstat.size;
+    if (rv) {
+      pos = Math.min(rv.total, rv.total - rv.queue.length + 1);
+      head = "复习 · " + pos + " / " + rv.total;
+    }
 
     var word = null;
     if (s.wordId && idx[s.wordId]) {
@@ -3092,14 +3274,16 @@
       return o;
     });
 
-    /* 契约 §6.1（v1.16）：done 的 CTA 判据改成「词本里有没有词」。
-       老实现读 book.total，而词本对象只有 id/name/groups/words —— total 恒 undefined，
-       于是「下一组」按钮从来不渲染。全书都背完时「下一组」已无处可去，改给「回词库」。 */
+    /* 契约 §6.1（v1.17）：done 的 CTA 判据是「词本里有没有词」（v1.16 修掉了
+       读 book.total 的老毛病）。done = 新词全部过完：还有词在待复习 → 「去复习」，
+       全书真背完（全掌握）→「回词库」。v1.16 那个「下一组」分支是死代码
+       （advanceGroups 会自动跳组，done 时 nextGroup 恒为 null），v1.17 删掉。 */
     var words = book.words || [];
     var doneCta = null;
     if (s.phase === "done" && words.length > 0) {
-      var wmap = (state.books[book.id] && state.books[book.id].w) || {};
-      doneCta = { label: core.schedule.nextGroup(book, wmap, g) ? "下一组" : "回词库" };
+      doneCta = sum.total.pending > 0
+        ? { label: "去复习（" + sum.total.pending + " 词）" }
+        : { label: "回词库" };
     }
 
     return {
@@ -3108,6 +3292,10 @@
       pos: pos,
       size: gstat.size,
       head: head,
+      /* 复习会话进度（v1.17）：非复习时为 null。UI 据此显示「结束复习」入口 */
+      review: rv ? { pos: pos, total: rv.total } : null,
+      /* done 页用：还剩多少词在待复习（新词背完但没全掌握时文案要说实话） */
+      pending: s.phase === "done" ? sum.total.pending : 0,
       word: word,
       options: options,
       answer: reveal ? s.answer : null,
@@ -3198,6 +3386,17 @@
     var activeG = state.sched.g;
     var gstat = sum.byGroup[activeG] || { g: activeG, mastered: 0, size: 0 };
 
+    /* 复习弹窗（§6.3，v1.17）：只在学习页、不在复习会话里、今天还没问过、
+       且有到期（最后作答 < 今天）的待复习词时出现。弹与不弹 UI 只看这个字段。 */
+    var reviewPrompt = null;
+    if (state.ui.route === "learn" && !state.review && state.p.reviewAsked !== today) {
+      var dueN = 0;
+      for (var di = 0; di < book.words.length; di++) {
+        if (core.derive.reviewDue(wmap[book.words[di].w], today)) dueN++;
+      }
+      if (dueN > 0) reviewPrompt = { due: dueN };
+    }
+
     var groups = sum.groups.map(function (gs) {
       return {
         g: gs.g,
@@ -3226,6 +3425,7 @@
         group: { g: activeG, mastered: gstat.mastered, size: gstat.size }
       },
       learn: state.ui.route === "learn" ? learnVM(state, book, sum, idx) : null,
+      reviewPrompt: reviewPrompt,
       list: state.ui.route === "list" ? listVM(state, book, wmap) : null,
       stats: state.ui.route === "stats" ? statsVM(state, book, idx, today) : null,
       groups: groups,
@@ -3303,11 +3503,19 @@
     }
   }
 
-  /* 开一张新卡；无卡可开则进入 done 态 */
+  /* 开一张新卡；无卡可开则进入 done 态。
+     复习会话（§4.1，v1.17）优先于组队列：复习队列空了自动回到正常组。 */
   function startCard(state) {
     var book = state.book;
-    advanceGroups(state);
-    var wid = core.schedule.current(state.sched);
+    var wid = null;
+    if (state.review) {
+      wid = state.review.queue[0] || null;
+      if (!wid) state.review = null; // 复习队列见底：落回正常学习
+    }
+    if (!state.review) {
+      advanceGroups(state);
+      wid = core.schedule.current(state.sched);
+    }
     if (!wid || !state.bookIdx[wid]) {
       state.session = { phase: "done", wordId: null, options: [], answer: null, picked: null, skipped: false, t0: 0 };
       return;
@@ -3346,6 +3554,7 @@
     state.seen = {};
     state.ui = { route: "learn", toast: null, toastUntil: 0, listFilter: null };
     state.undo = null;
+    state.review = null; // 复习会话（v1.17）：{ queue: [wordId…], total }，内存态不落盘
 
     var sched = core.schedule.initGroup(book, wmapOf(state, book), 1);
     while (core.schedule.done(sched) && sched.g < book.groups) {
@@ -3379,6 +3588,41 @@
       var g = state.sched && state.sched.g ? state.sched.g : 1;
       state.sched = core.schedule.initGroup(book, wmap(), g);
       advanceGroups(state);
+    }
+
+    /* 当前书里待复习（pendingReview）的词，按最后作答时间升序：最久没见的先复习。
+       source "due" 只收今天到期的（最后作答日 < 今天，§2.4 v1.17）；"all" 全收。 */
+    function pendingWords(source) {
+      var today = clock.today();
+      var words = book.words || [];
+      var list = [];
+      for (var i = 0; i < words.length; i++) {
+        var ws = wmap()[words[i].w];
+        if (!core.derive.pendingReview(ws)) continue;
+        if (source === "due" && !core.derive.reviewDue(ws, today)) continue;
+        list.push({ w: words[i].w, at: typeof ws.at === "number" ? ws.at : 0 });
+      }
+      list.sort(function (x, y) { return x.at - y.at; });
+      return list;
+    }
+
+    /* 复习会话（§4.1，v1.17）：一词一次机会，queue 见底自动回到正常组。
+       没有可复习的词时不进空会话，toast 说实话。 */
+    function startReviewSession(source) {
+      var list = pendingWords(source);
+      if (!list.length) {
+        toast(source === "due" ? "今天没有到期的复习词" : "没有待复习的词");
+        return false;
+      }
+      state.review = {
+        queue: list.map(function (e) { return e.w; }),
+        total: list.length
+      };
+      state.undo = null;
+      clearFlash();
+      state.ui.route = "learn";
+      nextCard();
+      return true;
     }
 
     function emit() {
@@ -3438,7 +3682,9 @@
     }
 
     function nextCard() {
+      var wasReview = !!state.review;
       startCard(state);
+      if (wasReview && !state.review) toast("复习完成，继续背新词");
       autoSpeakCurrent();
     }
 
@@ -3474,7 +3720,11 @@
       var next = core.grader.apply(prev, { ok: ok, k: skipped ? "skip" : "pick", t: now });
       if (next !== prev) {
         dirty = true;
-        state.undo = { word: s.wordId, prev: prev || null, sched: snapSched, session: snapSession };
+        /* rq：复习队列快照。撤销复习判分要把词还回队首，否则撤销等于白丢一次复习机会 */
+        state.undo = {
+          word: s.wordId, prev: prev || null, sched: snapSched, session: snapSession,
+          rq: state.review ? state.review.queue.slice() : null
+        };
         wmap()[s.wordId] = next;
         appendEvent({
           w: s.wordId, b: book.id, g: word.g, ok: ok,
@@ -3485,7 +3735,15 @@
       } else {
         state.undo = null;
       }
-      state.sched = core.schedule.afterJudge(state.sched, s.wordId, core.derive.mastered(wmap()[s.wordId]));
+      /* 复习会话里一词一次机会：判完即出列（对错都出），不进滑动窗口（§4.1）。
+         正常组里，刚转成待复习的词也立刻出列（v1.17：待复习只通过复习会话回来，
+         不能赖在当前窗口里当场把 rev 刷满 —— 那等于当天连续重考，测的是短时记忆）。 */
+      if (state.review) state.review.queue.shift();
+      else {
+        var judged = wmap()[s.wordId];
+        var leave = core.derive.mastered(judged) || core.derive.pendingReview(judged);
+        state.sched = core.schedule.afterJudge(state.sched, s.wordId, leave);
+      }
       /* 契约 §6.2：答对且这个词以前答对过（ok>0）→ flash（停 1 秒，直接下一词）；
          其余（答错 / 跳过 / 第一次答对）→ hold（同样停 1 秒看选项对照，再转 detail）。
          两侧共享那 1 秒，否则答错时用户根本来不及看清「其他三个选项是哪个词」。 */
@@ -3531,6 +3789,7 @@
       if (u.prev) wmap()[u.word] = u.prev;
       else delete wmap()[u.word];
       state.sched = cloneSched(u.sched);
+      if (state.review && u.rq) state.review.queue = u.rq.slice();
       state.session = cloneSession(u.session);
       state.session.phase = "ask";
       clearFlash();
@@ -3564,7 +3823,9 @@
           opts: optionTexts(s), picked: null, t: now
         });
       }
-      state.sched = core.schedule.afterJudge(state.sched, s.wordId, true);
+      /* 复习会话里标掌握同样一词一次：出列；组队列里它本来就不在，不用动 sched */
+      if (state.review) state.review.queue.shift();
+      else state.sched = core.schedule.afterJudge(state.sched, s.wordId, true);
       state.undo = null;
       toast("已标为已掌握");
       nextCard();
@@ -3610,6 +3871,7 @@
       state.sched = core.schedule.initGroup(book, wmap(), g);
       state.ui.route = "learn";
       state.undo = null;
+      state.review = null; // 跳组 = 打断复习会话，回正常学习
       nextCard();
     }
 
@@ -3638,8 +3900,10 @@
         }
         /* v1.16：merge 换了 books，内存里的 queue/pool 还按旧 wmap 排着 ——
            不重排的话，导入进来的「已掌握」在当前组不生效，会被重考一整组
-           （cet4 每组约 80 词）。撤销快照也一并作废，否则能撤回到导入前。 */
+           （cet4 每组约 80 词）。撤销快照也一并作废，否则能撤回到导入前。
+           复习会话同样作废（v1.17）：词表状态变了，旧队列不再可信。 */
         state.undo = null;
+        state.review = null;
         rebuildSched();
         if (
           state.session.phase === "ask" && state.session.wordId &&
@@ -3700,6 +3964,7 @@
         }
         state.seen = {};
         state.undo = null;
+        state.review = null;
         state.ui.route = "learn";
         state.ui.listFilter = null;
         clearFlash();
@@ -3728,8 +3993,9 @@
         judge(null);
       },
       continue: function () {
-        /* 完成页的「下一组」（契约 §6.1，v1.16）：还有没背完的组就跳过去，
-           全书都背完就回词库。老实现只认 reveal 三态，这个按钮点了完全没反应。 */
+        /* 完成页的 CTA（契约 §6.1）：还有没背完的组就跳过去；
+           新词背完但还有词在待复习 → 开复习会话（v1.17）；
+           全书真正背完（全掌握）才回词库。 */
         if (state.session.phase === "done") {
           if (!gated()) return;
           /* 空词本没有「下一组」可去，也不该把用户送到词库页 */
@@ -3738,6 +4004,8 @@
           if (next) {
             state.sched = next;
             nextCard();
+          } else if (pendingWords("all").length > 0) {
+            startReviewSession("all");
           } else {
             state.ui.route = "library";
             state.ui.listFilter = null;
@@ -3788,6 +4056,7 @@
         state.ui.route = "learn";
         state.ui.listFilter = null;
         state.undo = null;
+        state.review = null; // 换书 = 打断复习会话
         clearFlash();
         nextCard();
         dirty = true;
@@ -3800,6 +4069,25 @@
         if (!LIST_KEYS[a.key]) return;
         state.ui.listFilter = a.key;
         state.ui.route = "list";
+      },
+      /* 复习会话（§4.1，v1.17）：source "due" = 只收今天到期的（弹窗用）；
+         省略 / "all" = 全部待复习（「现在开始复习」按钮、done 页 CTA 用）。 */
+      startReview: function (a) {
+        startReviewSession(a && a.source === "due" ? "due" : "all");
+      },
+      /* 提前结束复习：丢掉剩余队列，回到正常组。已判过的词不回滚（日志照留） */
+      endReview: function () {
+        if (!state.review) return;
+        state.review = null;
+        state.undo = null;
+        clearFlash();
+        nextCard();
+      },
+      /* 复习弹窗每天只问一次（§6.3）：无论选了「先复习」还是「先背新词」，
+         甚至直接关掉弹窗，都把今天标记为已问过。 */
+      reviewAsked: function () {
+        state.p.reviewAsked = clock.today();
+        dirty = true;
       },
       /* 侧栏底色：渐变（跟右侧一致）或纯白（v1.7） */
       side: function (a) {
@@ -4315,7 +4603,7 @@
   var VERSION = 7;
 
   /* 与 core/migrate.js 同口径：这些键是内存态，不进导出文本 */
-  var RUNTIME = { sched: 1, session: 1, ui: 1, undo: 1, seen: 1, book: 1, clock: 1, bookIdx: 1, allBooks: 1 };
+  var RUNTIME = { sched: 1, session: 1, ui: 1, undo: 1, seen: 1, review: 1, book: 1, clock: 1, bookIdx: 1, allBooks: 1 };
 
   function clone(o) {
     var out = {};
