@@ -1,10 +1,10 @@
-/* app.css —— 由 build/concat.py 拼接，禁止手改。内容哈希：f152e12df3 */
+/* app.css —— 由 build/concat.py 拼接，禁止手改。内容哈希：fa70a29193 */
 
 /* ──────── src/ui/shared/tokens.css ──────── */
 /* tokens.css —— 由 build/gen_tokens.py 从 build/tokens.json 生成，禁止手改。
    想改颜色 / 圆角 / 字号：改 build/tokens.json，然后
        python3 build/gen_tokens.py
-   tokens 指纹：542c1b86f6
+   tokens 指纹：5645ff5140
 */
 
 :root{
