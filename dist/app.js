@@ -1,5 +1,5 @@
 /* app.js —— 由 build/concat.py 拼接，禁止手改。
-   内容哈希：8a00fe6a4a  prod  22 个文件
+   内容哈希：8e23ba7468  prod  22 个文件
    顺序见 build/manifest.json */
 
 /* ──────── src/ui/shared/dom.js ──────── */
@@ -664,7 +664,9 @@
     var learn = vm.learn;
     if (learn.phase === "done") return donePage(vm, dispatch);
     if (learn.phase === "detail") return detailPage(vm, dispatch);
-    var flash = learn.phase === "flash";
+    /* flash = 答对后停 1 秒直接下一词；hold = 答错 / 跳过 / 第一次答对，停 1 秒再进详情。
+       两个态都不给 CTA：那 1 秒由 core 的定时器接管（§6.2）。 */
+    var silent = learn.phase === "flash" || learn.phase === "hold";
     var reveal = learn.phase !== "ask";
     var page = h("main", {
       class: "mob-page mob-learn " + (reveal ? "is-reveal" : "is-ask")
@@ -712,8 +714,8 @@
     page.appendChild(opts);
 
     if (reveal) {
-      /* flash：答对但不再展示详情，1 秒后 core 自己翻页，这里只留选项的对错标记 */
-      if (flash) return page;
+      /* 那 1 秒里只留选项的对错标记，不摆按钮 —— 摆了也来不及点 */
+      if (silent) return page;
 
       var cta = h("div", { class: "mob-cta" });
       cta.appendChild(
@@ -1161,9 +1163,10 @@
   var lastPhase = null;
 
   function render(vm, root, dispatch) {
-    /* 每次判分（ask → detail/flash）响一次：答对高音、答错 / 跳过低音。
-       后续重渲染（比如 toast 消失）不再响。 */
-    if (vm.learn && (vm.learn.phase === "detail" || vm.learn.phase === "flash") &&
+    /* 每次判分（ask → flash/hold）响一次：答对高音、答错 / 跳过低音。
+       detail 是 hold 那 1 秒之后的二次渲染，不能再响，所以只认 ask → flash/hold。
+       hold 与 flash 一样要在这里，否则答错就静音了。 */
+    if (vm.learn && (vm.learn.phase === "flash" || vm.learn.phase === "hold") &&
         lastPhase === "ask") {
       var wrong = vm.learn.picked !== null && vm.learn.picked !== vm.learn.answer;
       WC.ui.ding(wrong || vm.learn.skipped ? "wrong" : "right");
@@ -1523,9 +1526,12 @@
       )
     );
 
+    /* 那 1 秒里的右下角提示要说实话：flash 是直接走，hold 是看完转详情 */
     var right;
-    if (!isAsk) {
+    if (learn.phase === "flash") {
       right = h("div", { class: "desk-foot-right desk-foot-tip", text: "自动进入下一词" });
+    } else if (learn.phase === "hold") {
+      right = h("div", { class: "desk-foot-right desk-foot-tip", text: "稍候看详情" });
     } else {
       right = h("div", { class: "desk-foot-right desk-foot-tip", text: "空格继续" });
     }
@@ -1978,7 +1984,9 @@
 
   function render(vm, root, dispatch) {
     if (!vm || !root) return;
-    if (vm.learn && (vm.learn.phase === "detail" || vm.learn.phase === "flash") &&
+    /* 每次判分（ask → flash/hold）响一次：答对高音、答错 / 跳过低音。
+       hold 不能漏 —— 答错走的是 hold，1 秒后转 detail 时不该再响。 */
+    if (vm.learn && (vm.learn.phase === "flash" || vm.learn.phase === "hold") &&
         lastPhase === "ask") {
       var wrong = vm.learn.picked !== null && vm.learn.picked !== vm.learn.answer;
       WC.ui.ding(wrong || vm.learn.skipped ? "wrong" : "right");
@@ -2917,7 +2925,9 @@
       };
     }
 
-    var reveal = s.phase === "detail" || s.phase === "flash";
+    /* reveal = 已经判完分、可以公开答案的三个态：
+       detail（停下来看详情）/ flash（停 1 秒下一词）/ hold（停 1 秒再进 detail） */
+    var reveal = s.phase === "detail" || s.phase === "flash" || s.phase === "hold";
     var options = (s.options || []).map(function (op, i) {
       var mark = "idle";
       if (reveal) {
@@ -2949,7 +2959,7 @@
           ? (book.total > 0 ? { label: "下一组" } : null)
           : s.phase === "detail"
           ? { label: "继续" }
-          : null,        // flash 不给按钮，1 秒后自己走
+          : null,        // flash / hold 不给按钮：1 秒后 core 自己接管（下一词 / 详情）
       hints: { answer: HINTS.answer, pick: HINTS.pick, undo: HINTS.undo }
     };
   }
@@ -3046,7 +3056,7 @@
       v: 1,
       route: state.ui.route,
       theme: state.p.theme,
-      canUndo: !!state.undo && (state.session.phase === "detail" || state.session.phase === "flash"),
+      canUndo: !!state.undo && (state.session.phase === "detail" || state.session.phase === "flash" || state.session.phase === "hold"),
       toast: state.ui.toast ? { text: state.ui.toast.text, kind: state.ui.toast.kind } : null,
       book: { id: book.id, name: book.name, total: (book.words || []).length, groups: book.groups },
       books: bookList(state, book),
@@ -3090,11 +3100,15 @@
   var THEMES = { g1: 1, g2: 1, g3: 1 };
   var LIST_KEYS = { fav: 1, review: 1, learning: 1, mastered: 1, all: 1 };
   var TOAST_MS = 2000;
-  var FLASH_MS = 1000; // 答对但不展示详情：叮一声后停留 1 秒自动进下一词
+  var FLASH_MS = 1000; // 判分后停在原地的那 1 秒
 
-  /* 判分之后、进入下一题之前的两个态：detail = 停下来看详情，flash = 一闪而过 */
+  /* 判分之后、进入下一题之前的三个态：
+     detail = 停下来看详情（等用户点「继续」）
+     flash  = 停 1 秒看选项对照，然后自动下一词
+     hold   = 停 1 秒看选项对照，然后转 detail（答错 / 跳过 / 第一次答对）
+     flash 和 hold 的渲染是同一套：四个选项标出对错、干扰项带上自己是哪个词。 */
   function isReviewPhase(p) {
-    return p === "detail" || p === "flash";
+    return p === "detail" || p === "flash" || p === "hold";
   }
 
   function wmapOf(state, book) {
@@ -3116,7 +3130,8 @@
     return {
       phase: s.phase,
       wordId: s.wordId,
-      options: s.options.map(function (o) { return { pos: o.pos, cn: o.cn }; }),
+      /* v1.12 起选项带 w，快照必须一起拷，否则撤销后重新揭示时干扰项说不出自己是谁 */
+      options: s.options.map(function (o) { return { pos: o.pos, cn: o.cn, w: o.w }; }),
       answer: s.answer,
       picked: s.picked,
       skipped: s.skipped,
@@ -3299,17 +3314,19 @@
         state.undo = null;
       }
       state.sched = core.schedule.afterJudge(state.sched, s.wordId, core.derive.mastered(wmap()[s.wordId]));
-      /* 契约 §6.2：答对且这个词以前答对过（ok>0）→ flash（叮一声、1 秒后自动走）；
-         否则（答错 / 跳过 / 第一次答对）→ detail（停下来看详情，用户点「继续」） */
+      /* 契约 §6.2：答对且这个词以前答对过（ok>0）→ flash（停 1 秒，直接下一词）；
+         其余（答错 / 跳过 / 第一次答对）→ hold（同样停 1 秒看选项对照，再转 detail）。
+         两侧共享那 1 秒，否则答错时用户根本来不及看清「其他三个选项是哪个词」。 */
       var seenRight = !!(prev && prev.ok > 0);
-      s.phase = ok && seenRight ? "flash" : "detail";
+      s.phase = ok && seenRight ? "flash" : "hold";
       s.picked = skipped ? null : picked;
       s.skipped = skipped;
-      if (s.phase === "flash") armFlash();
+      armFlash();
       if (!ok && !skipped) toast("记下了，稍后再考你一次");
     }
 
-    /* flash 的自动前进：任何用户动作都要先取消，否则「叮」完还会再跳一次 */
+    /* 那 1 秒的定时器：flash → 直接下一词；hold → 转 detail（等用户点「继续」）。
+       任何用户动作都要先取消，否则「叮」完还会再跳一次 */
     var flashTimer = null;
     function clearFlash() {
       if (flashTimer) {
@@ -3321,10 +3338,15 @@
       clearFlash();
       flashTimer = setTimeout(function () {
         flashTimer = null;
-        if (state.session.phase === "flash") {
+        var phase = state.session.phase;
+        if (phase === "flash") {
           state.undo = null;
           nextCard();
           save();
+          emit();
+        } else if (phase === "hold") {
+          /* 对照看完了再换详情页。undo 留着 —— detail 态还能撤销这一次判分 */
+          state.session.phase = "detail";
           emit();
         }
       }, FLASH_MS);
