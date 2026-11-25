@@ -1,5 +1,5 @@
 /* app.js —— 由 build/concat.py 拼接，禁止手改。
-   内容哈希：8e9f9e6755  prod  22 个文件
+   内容哈希：4d5af10be8  prod  22 个文件
    顺序见 build/manifest.json */
 
 /* ──────── src/ui/shared/dom.js ──────── */
@@ -190,14 +190,14 @@
     return h("div", { class: "wc-toast" + (t.kind === "err" ? " is-err" : ""), role: "status", text: t.text });
   }
 
-  /* 重置确认流程（v1.14）：选档位 → 执行 → 结果提示。
+  /* 重置确认流程（v1.15）：一道确认 → 执行 → 结果提示。
      桌面和手机只有弹层样式不同（cls），流程和文案必须一模一样，所以放这里。
 
-     两档差别就一句话：
-       progress  清记忆，留下备注、收藏和统计 —— 背第二遍用这个
-       all       连统计和收藏一起清 —— 只有「想彻底忘掉这件事」才选
+     只有一档：清记忆，留下备注 / 收藏 / 统计 —— 重置是「再背一遍」，不是
+     「抹掉过去」。v1.14 那档「彻底清空」（连统计和收藏一起清）2026-11-25 按
+     用户要求删掉：它跟「保留数据供分析」正好相反，还多一个随时会点错的按钮。
 
-     onRun(mode) 由调用方给（app.js 的 resetGame），返回 Promise。
+     onRun 由调用方给（app.js 的 resetGame），返回 Promise。
      执行前那边会先备份；备份失败会返回 ok:false，这里只负责把话说清楚。 */
   function resetSheet(o) {
     var opts = o || {};
@@ -207,9 +207,9 @@
       sheet({ cls: cls, items: items });
     }
 
-    function run(mode) {
+    function run() {
       if (!opts.onRun) return;
-      var p = opts.onRun(mode);
+      var p = opts.onRun();
       if (!p || !p.then) return;
       p.then(function (r) {
         if (!r || !r.ok) {
@@ -254,18 +254,10 @@
     open([
       {
         label: "重来这一遍 · 清空记忆，保留备注和统计",
-        onSelect: function () {
-          run("progress");
-        }
-      },
-      {
-        label: "彻底清空 · 连统计和收藏一起清",
+        /* danger 让它看起来就是「要动数据的那一项」，手滑点错了也只是取消 */
         danger: true,
         onSelect: function () {
-          open([
-            { label: "确定彻底清空？日志和收藏都会没有", danger: true, onSelect: function () { run("all"); } },
-            { label: "取消" }
-          ]);
+          run();
         }
       },
       { label: "取消" }
@@ -1117,7 +1109,7 @@
                 click: function () {
                   if (!WC.ui || !WC.ui.resetSheet || !WC.app || !WC.app.resetGame) return;
                   WC.ui.resetSheet({
-                    onRun: function (mode) { return WC.app.resetGame(mode); }
+                    onRun: function () { return WC.app.resetGame(); }
                   });
                 }
               }
@@ -1848,7 +1840,8 @@
       if (WC.app && WC.app.backupEnabled && WC.app.backupEnabled()) {
         dataRows.push(["备份", "打开文件夹", function () { if (WC.app) WC.app.openBackupFolder(); }]);
       }
-      /* 重置：背完一遍之后再背一遍。危险操作，流程（两档 + 确认 + 备份）在 WC.ui.resetSheet */
+      /* 重置：背完一遍之后再背一遍。只有一档（清记忆、留备注和统计），
+         流程和确认在 WC.ui.resetSheet。 */
       dataRows.push([
         "重置",
         "背完重来一遍",
@@ -1856,7 +1849,7 @@
           if (!WC.ui || !WC.ui.resetSheet || !WC.app || !WC.app.resetGame) return;
           WC.ui.resetSheet({
             cls: "desk-sheet",
-            onRun: function (mode) { return WC.app.resetGame(mode); }
+            onRun: function () { return WC.app.resetGame(); }
           });
         }
       ]);
@@ -3610,13 +3603,15 @@
           );
       },
 
-      /* 重置（v1.14）：背完一遍后重来一遍。
-           mode:"progress"（默认）清记忆，留下备注、收藏和统计
-           mode:"all"      连日志和收藏一起清，等于刚装的样子
-         文件层面的备份由 app.js 在 dispatch **之前**做——core 不碰文件系统，
+      /* 重置（v1.15）：背完一遍后重来一遍。只有一种做法 —— 清「记忆」
+         （ok/bad/rev/at），**一定留着**备注、收藏、日志：重置是「再背一次」，
+         不是「抹掉过去」，统计要能继续分析第一遍的成绩。
+         v1.14 曾经有第二档 mode:"all"（连日志和收藏一起清），2026-11-25 按用户
+         要求删掉：它跟「保留数据供分析」正好相反，还多一个随时会点错的危险选项，
+         不值得为省一次重装留着。真要清干净，删掉 userData 重装就是了。
+         文件层面的备份由 app.js 在 dispatch **之前**做 —— core 不碰文件系统，
          也不该假装知道「备份」这回事。 */
-      reset: function (a) {
-        var mode = a && a.mode === "all" ? "all" : "progress";
+      reset: function () {
         var n = 0;
         for (var id in state.books) {
           var b = state.books[id];
@@ -3629,15 +3624,12 @@
             if (ws && ((ws.ok | 0) > 0 || (ws.bad | 0) > 0 || (ws.rev | 0) > 0)) n++;
             /* 备注是手写内容，不是「背了多少」—— 重置进度必须留着它，
                否则用户第一遍辛苦抄的例句、易混点会被顺手抹掉。 */
-            var note = mode === "progress" && ws && typeof ws.note === "string" ? ws.note : "";
+            var note = ws && typeof ws.note === "string" ? ws.note : "";
             if (!note) delete b.w[w];
             else b.w[w] = { ok: 0, bad: 0, rev: 0, at: 0, note: note };
           }
         }
-        if (mode === "all") {
-          state.log = [];
-          state.fav = {};
-        } else if (n > 0) {
+        if (n > 0) {
           /* 留一条分界：将来统计要「只看这一遍」时，靠它切。现在分析页只认
              pick / skip / master，这条不会被算进任何数字（§2.6）。 */
           core.log.append(state.log, {
@@ -3658,11 +3650,9 @@
         nextCard();
         dirty = true;
         toast(
-          mode === "all"
-            ? "已彻底清空"
-            : n > 0
-              ? "已重置：" + n + " 词回到未学"
-              : "本来就是清的，没有可重置的进度"
+          n > 0
+            ? "已重置：" + n + " 词回到未学"
+            : "本来就是清的，没有可重置的进度"
         );
       },
 
@@ -4376,9 +4366,9 @@ WC.books["cet4-key600"] = {"id":"cet4-key600","name":"四级重点词汇600","gr
 
   /* 重置：先存一份备份，确认它真落了盘，再动数据。
      备份失败就**不重置** —— 宁可这次没重来，也不能让进度无路可退。
-     唯一的例外是「本来就没有词条」（no-words）：那是空档，没什么可丢的。 */
-  function resetGame(mode) {
-    var m = mode === "all" ? "all" : "progress";
+     唯一的例外是「本来就没有词条」（no-words）：那是空档，没什么可丢的。
+     只有一种做法（清记忆、留备注/收藏/日志），没有"彻底清空"那一档 —— 见 store.js。 */
+  function resetGame() {
     if (!engine || !engine.exportText) return Promise.resolve({ ok: false, reason: "no-engine" });
 
     var pre;
@@ -4400,10 +4390,10 @@ WC.books["cet4-key600"] = {"id":"cet4-key600","name":"四级重点词汇600","gr
         if (needsBackup && (!r || !r.ok) && !nothingToLose) {
           return { ok: false, reason: "backup-failed", detail: r || null };
         }
-        dispatch({ type: "reset", mode: m });
+        dispatch({ type: "reset" });
         /* 记一笔，别让 6 秒后的排队备份又把空档试一遍 */
         bkLastAt = Date.now();
-        return { ok: true, mode: m, backup: (r && r.name) || null };
+        return { ok: true, backup: (r && r.name) || null };
       })
       .catch(function (e) {
         return { ok: false, reason: "throw", message: String((e && e.message) || e) };
