@@ -1,4 +1,4 @@
-/* app.css —— 由 build/concat.py 拼接，禁止手改。内容哈希：fa70a29193 */
+/* app.css —— 由 build/concat.py 拼接，禁止手改。内容哈希：bd66fbc446 */
 
 /* ──────── src/ui/shared/tokens.css ──────── */
 /* tokens.css —— 由 build/gen_tokens.py 从 build/tokens.json 生成，禁止手改。
@@ -428,6 +428,66 @@ body.wc-has-notice .desk-root{padding-top:26px}
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .wc-stat-row-n{flex:none;font-size:var(--fs-small);color:var(--ink3)}
+
+/* ── 详情页共享区块（v1.19） ─────────────────────────── */
+.wc-detail-sec{margin-top:18px}
+.wc-detail-h{
+  margin:0 0 8px;
+  font-size:var(--fs-small);
+  color:var(--canvas-pos);
+  letter-spacing:.06em;
+}
+.wc-senses{display:flex;flex-direction:column;gap:8px}
+.wc-sense{
+  padding:10px 12px;
+  border-radius:var(--radius-control);
+  background:var(--white-46);
+}
+.wc-sense-head{
+  display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
+}
+.wc-sense-pos{font-size:var(--fs-small);color:var(--canvas-pos)}
+.wc-sense-cn{font-size:var(--fs-body);color:var(--ink);line-height:1.6}
+.wc-sense-en{
+  margin-top:4px;
+  font-size:var(--fs-phonetic);
+  line-height:1.65;
+  color:var(--canvas-body);
+}
+.wc-sense-ex{
+  margin-top:7px;
+  padding-left:10px;
+  border-left:2px solid var(--line);
+  font-size:var(--fs-small);
+  line-height:1.65;
+  color:var(--canvas-sub);
+}
+.wc-sense-ex-en{color:var(--canvas-body)}
+.wc-sense-ex-zh{margin-top:2px}
+.wc-chips{display:flex;flex-wrap:wrap;gap:6px}
+.wc-chip{
+  display:inline-flex;align-items:baseline;gap:5px;
+  padding:3px 10px;
+  border-radius:999px;
+  background:var(--white-46);
+  font-size:var(--fs-small);
+  color:var(--canvas-body);
+}
+.wc-chip b{font-weight:500;color:var(--canvas-pos)}
+.wc-freq{display:flex;flex-wrap:wrap;gap:6px}
+.wc-freq span{
+  padding:2px 9px;
+  border-radius:999px;
+  background:var(--white-46);
+  font-size:var(--fs-tiny);
+  color:var(--canvas-sub);
+}
+.wc-detail-src{
+  margin-top:16px;
+  font-size:var(--fs-tiny);
+  line-height:1.5;
+  color:var(--canvas-pos);
+}
 
 /* ──────── src/ui/mobile/mobile.css ──────── */
 /* mobile.css —— M2 手机三页 + 底部页签。只许用 tokens.css 里的变量，无颜色字面量。 */
@@ -886,6 +946,10 @@ button, [role="button"]{-webkit-tap-highlight-color:transparent}
   line-height:1.6;
   text-align:center;
 }
+
+/* v1.19：多义项详情 */
+.mob-detail-body .wc-detail-sec{margin-top:20px}
+.mob-detail-body .wc-detail-src{padding-bottom:8px}
 
 /* ──────── src/ui/desktop/desktop.css ──────── */
 /* desktop.css —— M4 桌面布局（严格照样板：206 侧栏 + 满高主区 + 渐变大卡）。
@@ -1410,3 +1474,8 @@ button, [role="button"]{-webkit-tap-highlight-color:transparent}
   .desk-stat-card .wc-stat-metrics{grid-template-columns:repeat(2,1fr)}
   .desk-stat-card .wc-stat-metrics.is-3{grid-template-columns:repeat(3,1fr)}
 }
+
+/* v1.19：详情内容变长（多义项/词形/同根词），卡片自己滚，CTA 不挡内容 */
+.desk-detail{min-height:0;overflow-y:auto}
+.desk-detail-body{flex:none}
+.desk-detail .wc-detail-src{padding-bottom:8px}
